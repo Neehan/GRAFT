@@ -17,7 +17,7 @@ from graft.train.sampler import GraphBatchSampler
 from graft.train.mining import HardNegativeMiner
 from graft.data.pair_maker import load_query_pairs
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("graft.train")
 
 
 def train(config_path):
@@ -32,6 +32,8 @@ def train(config_path):
         name=cfg["experiment"]["name"],
         config=cfg
     )
+    wandb.define_metric("global_step")
+    wandb.define_metric("*", step_metric="global_step")
 
     encoder = Encoder(
         model_name=cfg["encoder"]["model_name"],
@@ -152,20 +154,24 @@ def train(config_path):
             global_step += 1
 
             if global_step % cfg["train"]["log_every"] == 0:
-                wandb.log({
+                metrics = {
+                    "global_step": global_step,
                     "loss": loss.item(),
                     "loss_q2d": loss_q2d.item(),
                     "loss_nbr": loss_nbr.item(),
                     "lr_encoder": scheduler.get_last_lr()[0],
                     "lr_gnn": scheduler.get_last_lr()[1],
-                    "step": global_step
-                })
+                }
+                wandb.log(metrics)
+                logger.info(f"Step {global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}")
 
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            pbar.set_postfix({"loss": f"{loss.item():.4f}", "step": global_step})
 
             if global_step % cfg["train"]["eval_every_steps"] == 0:
+                logger.info(f"Running evaluation at step {global_step}...")
                 recall = evaluate(encoder, dev_pairs, cfg, device)
-                wandb.log({"dev_recall@10": recall, "step": global_step})
+                logger.info(f"Step {global_step}: dev_recall@10={recall:.4f}")
+                wandb.log({"global_step": global_step, "dev_recall@10": recall})
 
                 if recall > best_recall:
                     best_recall = recall
@@ -180,7 +186,35 @@ def train(config_path):
 
 def evaluate(encoder, dev_pairs, cfg, device):
     encoder.eval()
-    return 0.0
+
+    graph = torch.load(cfg["data"]["graph_path"], weights_only=False)
+    num_nodes = len(graph.node_text)
+
+    correct = 0
+    total = min(len(dev_pairs), 1000)
+
+    with torch.no_grad():
+        for i in range(total):
+            pair = dev_pairs[i]
+            query = pair["query"]
+            pos_node = pair["pos_node"]
+
+            query_embed = encoder.encode([query], device)
+
+            neg_indices = torch.randint(0, num_nodes, (10,))
+            candidate_indices = torch.cat([torch.tensor([pos_node]), neg_indices])
+
+            candidate_texts = [graph.node_text[int(idx)] for idx in candidate_indices]
+            candidate_embeds = encoder.encode(candidate_texts, device)
+
+            scores = torch.matmul(query_embed, candidate_embeds.T).squeeze(0)
+            top_k_indices = torch.topk(scores, k=min(10, len(scores))).indices
+
+            if 0 in top_k_indices:
+                correct += 1
+
+    recall_at_10 = correct / total
+    return recall_at_10
 
 
 def save_checkpoint(encoder, gnn, output_dir, tag):
