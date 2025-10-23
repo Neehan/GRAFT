@@ -11,7 +11,7 @@ setup(
         "datasets>=2.12.0",
         "torch-geometric>=2.3.0",
         "pyyaml>=6.0",
-        "numpy>=1.24.0",
+        "numpy>=1.24.0,<2.0.0",
         "scikit-learn>=1.2.0",
         "tqdm>=4.65.0",
         "wandb>=0.15.0",
