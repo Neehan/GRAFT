@@ -24,7 +24,7 @@ gnn:
   layers: 1
   hidden_dim: 768
   dropout: 0.1
-  fanouts: [10]
+  fanouts: [5]
 
 loss:
   tau: 0.1
