@@ -23,7 +23,7 @@ gnn:
   fanouts: [10]
 
 loss:
-  tau: 0.07
+  tau: 0.1
   tau_graph: 0.2
   lambda_q2d: 0.7
   alpha_link: 0.0
@@ -51,8 +51,3 @@ index:
   nlist: 4096
   nprobe: 32
   topk: 50
-
-rag:
-  generator: gpt-4o-mini
-  topk_ctx: 10
-  prompt_template: ./templates/hotpot.txt

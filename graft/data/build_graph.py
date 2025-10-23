@@ -8,27 +8,6 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
-def chunk_text(text, chunk_size, overlap):
-    """Split text into overlapping chunks by tokens."""
-    tokens = text.split()
-    chunks = []
-
-    if len(tokens) <= chunk_size:
-        return [text]
-
-    start = 0
-    while start < len(tokens):
-        end = start + chunk_size
-        chunk = ' '.join(tokens[start:end])
-        chunks.append(chunk)
-        start += chunk_size - overlap
-
-        if end >= len(tokens):
-            break
-
-    return chunks
-
-
 def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
     """Build graph from HotpotQA with chunking and supporting fact co-occurrence edges.
 
@@ -41,7 +20,9 @@ def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
     passage_texts = {}
 
     for item in dataset:
-        for title, sentences in zip(item["context"]["title"], item["context"]["sentences"]):
+        for title, sentences in zip(
+            item["context"]["title"], item["context"]["sentences"]
+        ):
             if title not in passage_texts:
                 passage_texts[title] = " ".join(sentences)
 
@@ -51,7 +32,7 @@ def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
     edge_list = []
 
     for title, text in passage_texts.items():
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
+        chunks = _chunk_text(text, chunk_size, chunk_overlap)
         chunk_ids = []
 
         for chunk in chunks:
@@ -70,7 +51,7 @@ def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
             continue
 
         for i, title1 in enumerate(supporting_titles):
-            for title2 in supporting_titles[i+1:]:
+            for title2 in supporting_titles[i + 1 :]:
                 if title1 in title_to_node_ids and title2 in title_to_node_ids:
                     for node1 in title_to_node_ids[title1]:
                         for node2 in title_to_node_ids[title2]:
@@ -85,6 +66,63 @@ def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
     graph = Data(edge_index=edge_index)
     graph.node_text = node_texts
     graph.title_to_node_ids = dict(title_to_node_ids)
+    graph.title_to_id = {
+        title: title_to_node_ids[title][0] for title in title_to_node_ids
+    }
+
+    num_nodes = len(node_texts)
+    num_edges = edge_index.size(1)
+
+    logger.info(
+        f"Graph saved: {num_nodes} nodes ({len(passage_texts)} passages), {num_edges} edges"
+    )
+    _compute_graph_stats(edge_index, num_nodes)
 
     torch.save(graph, output_path)
-    logger.info(f"Graph saved: {len(node_texts)} nodes ({len(passage_texts)} passages), {edge_index.size(1)} edges")
+
+
+def _chunk_text(text, chunk_size, overlap):
+    """Split text into overlapping chunks by tokens."""
+    tokens = text.split()
+    chunks = []
+
+    if len(tokens) <= chunk_size:
+        return [text]
+
+    start = 0
+    while start < len(tokens):
+        end = start + chunk_size
+        chunk = " ".join(tokens[start:end])
+        chunks.append(chunk)
+        start += chunk_size - overlap
+
+        if end >= len(tokens):
+            break
+
+    return chunks
+
+
+def _compute_graph_stats(edge_index, num_nodes):
+    """Compute and log graph degree statistics.
+
+    Args:
+        edge_index: Edge index tensor (2, E)
+        num_nodes: Total number of nodes
+    """
+    degrees = torch.zeros(num_nodes, dtype=torch.long)
+    if edge_index.size(1) > 0:
+        for node_id in edge_index[0]:
+            degrees[node_id] += 1
+
+    mean_degree = degrees.float().mean().item()
+    std_degree = degrees.float().std().item()
+    median_degree = degrees.float().median().item()
+    max_degree = degrees.max().item()
+
+    logger.info(
+        f"Degree stats: mean={mean_degree:.2f}, std={std_degree:.2f}, "
+        f"median={median_degree:.0f}, max={max_degree}"
+    )
+    logger.info(
+        f"Suggested fanout: {int(mean_degree)} (mean) or {int(median_degree)} (median)"
+    )
