@@ -17,10 +17,10 @@ encoder:
 
 gnn:
   type: graphsage
-  layers: 2
+  layers: 1
   hidden_dim: 768
   dropout: 0.1
-  fanouts: [15, 10]
+  fanouts: [10]
 
 loss:
   tau: 0.07
@@ -30,7 +30,7 @@ loss:
 
 train:
   batch_size_nodes: 4096
-  batch_size_queries: 128
+  batch_size_queries: 32
   epochs: 2
   lr_encoder: 2.0e-5
   lr_gnn: 1.0e-3
