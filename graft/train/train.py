@@ -232,7 +232,7 @@ class GRAFTTrainer:
             subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
         ).nonzero()[:, 0]
 
-        labels = pos_indices_in_subgraph
+        labels = pos_indices_in_subgraph.contiguous()
 
         pos_edges_gpu = (
             batch.get("pos_edges").clone().to(self.device)
@@ -329,11 +329,11 @@ class GRAFTTrainer:
         """Main training loop."""
         if self.accelerator.is_main_process:
             logger.info("Running zero-shot evaluation...")
-            zero_shot_recall = self._evaluate()
-            logger.info(
-                f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
-            )
-            wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+            # zero_shot_recall = self._evaluate()
+            # logger.info(
+            #     f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+            # )
+            # wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
         self.accelerator.wait_for_everyone()
 
