@@ -202,31 +202,28 @@ class GRAFTTrainer:
                 f"edge_index: shape={subgraph.edge_index.shape}, device={subgraph.edge_index.device}"
             )
 
-        query_encoded = self._tokenize(queries)
-        query_input_ids = query_encoded["input_ids"].clone().to(self.device)
-        query_attention_mask = query_encoded["attention_mask"].clone().to(self.device)
-        query_embeds = self.encoder(query_input_ids, query_attention_mask)
-
         subgraph_node_ids = subgraph.n_id
         subgraph_texts = [
             self.graph.node_text[int(nid)] for nid in subgraph.n_id_cpu.numpy()
         ]
 
-        node_encoded = self._tokenize(subgraph_texts)
+        # Encode queries + nodes in ONE forward pass to avoid internal state conflicts
+        all_texts = queries + subgraph_texts
+        all_encoded = self._tokenize(all_texts)
 
-        # Batch encoding to avoid OOM with large subgraphs
+        # Single batched forward pass
         encoder_batch_size = self.cfg["encoder"]["batch_size"]
-        node_embeds_list = []
-        num_nodes = node_encoded["input_ids"].size(0)
+        all_embeds_list = []
+        num_texts = all_encoded["input_ids"].size(0)
 
-        for i in range(0, num_nodes, encoder_batch_size):
+        for i in range(0, num_texts, encoder_batch_size):
             batch_input_ids = (
-                node_encoded["input_ids"][i : i + encoder_batch_size]
+                all_encoded["input_ids"][i : i + encoder_batch_size]
                 .clone()
                 .to(self.device)
             )
             batch_attention_mask = (
-                node_encoded["attention_mask"][i : i + encoder_batch_size]
+                all_encoded["attention_mask"][i : i + encoder_batch_size]
                 .clone()
                 .to(self.device)
             )
@@ -237,9 +234,14 @@ class GRAFTTrainer:
                 )
 
             batch_embeds = self.encoder(batch_input_ids, batch_attention_mask)
-            node_embeds_list.append(batch_embeds)
+            all_embeds_list.append(batch_embeds)
 
-        node_embeds_raw = torch.cat(node_embeds_list, dim=0)
+        all_embeds = torch.cat(all_embeds_list, dim=0)
+
+        # Split back into query and node embeddings
+        num_queries = len(queries)
+        query_embeds = all_embeds[:num_queries]
+        node_embeds_raw = all_embeds[num_queries:]
 
         edge_index_gpu = subgraph.edge_index.clone().to(self.device)
 
