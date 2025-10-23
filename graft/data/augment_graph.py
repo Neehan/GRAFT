@@ -143,9 +143,12 @@ def build_knn_edges(embeddings, k, config):
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
     index = faiss.IndexFlatIP(dim)
+    logger.info(f"Adding {num_nodes} vectors to index...")
     index.add(embeddings)
+    logger.info("Index built on CPU")
 
     if torch.cuda.is_available():
+        logger.info("Moving index to GPU...")
         ngpus = torch.cuda.device_count()
         if ngpus > 1:
             index = faiss.index_cpu_to_all_gpus(index)
@@ -154,9 +157,11 @@ def build_knn_edges(embeddings, k, config):
             res = faiss.StandardGpuResources()
             index = faiss.index_cpu_to_gpu(res, 0, index)
             logger.info("FAISS index moved to GPU 0")
+    else:
+        logger.info("CUDA not available, using CPU for FAISS (will be slow)")
 
     batch_size = config["data"]["batch_size"]
-    logger.info(f"Querying k={k} nearest neighbors with batch_size={batch_size}...")
+    logger.info(f"Starting kNN search: k={k}, batch_size={batch_size}...")
     all_indices = []
 
     for i in tqdm(range(0, num_nodes, batch_size), desc="kNN search"):
