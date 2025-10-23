@@ -21,10 +21,10 @@ encoder:
   freeze_layers: 0
 
 gnn:
-  layers: 1
+  layers: 2
   hidden_dim: 768
   dropout: 0.1
-  fanouts: [5]
+  fanouts: [5, 3]
 
 loss:
   tau: 0.1
@@ -44,7 +44,7 @@ train:
   bf16: true
   seed: 42
   log_every: 20
-  eval_every_steps: 500
+  eval_every_steps: 100
 
 eval:
   num_samples: 500

@@ -8,7 +8,6 @@ import wandb
 from pathlib import Path
 from tqdm import tqdm
 from accelerate import Accelerator
-from accelerate.utils import DistributedDataParallelKwargs
 from transformers import get_cosine_schedule_with_warmup
 from datasets import load_dataset
 
@@ -38,12 +37,10 @@ class GRAFTTrainer:
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.cfg["train"][
                 "gradient_accumulation_steps"
             ],
-            kwargs_handlers=[ddp_kwargs],
         )
         self.device = self.accelerator.device
 
@@ -339,11 +336,11 @@ class GRAFTTrainer:
         """Main training loop."""
         if self.accelerator.is_main_process:
             logger.info("Running zero-shot evaluation...")
-            # zero_shot_recall = self._evaluate()
-            # logger.info(
-            #     f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
-            # )
-            # wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+            zero_shot_recall = self._evaluate()
+            logger.info(
+                f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+            )
+            wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
         self.accelerator.wait_for_everyone()
 
@@ -351,11 +348,14 @@ class GRAFTTrainer:
             self.encoder.train()
             self.gnn.train()
 
+            total_steps = (
+                len(self.sampler) // self.cfg["train"]["gradient_accumulation_steps"]
+            )
             pbar = tqdm(
-                self.sampler, desc=f"Epoch {epoch+1}/{self.cfg['train']['epochs']}"
+                total=total_steps, desc=f"Epoch {epoch+1}/{self.cfg['train']['epochs']}"
             )
 
-            for batch in pbar:
+            for batch in self.sampler:
                 with self.accelerator.accumulate(self.encoder, self.gnn):
                     step_output = self._training_step(batch)
                     loss = step_output["loss"]
@@ -397,6 +397,7 @@ class GRAFTTrainer:
                             )
 
                     if self.accelerator.sync_gradients:
+                        pbar.update(1)
                         pbar.set_postfix(
                             {"loss": f"{loss.item():.4f}", "step": self.global_step}
                         )
@@ -427,6 +428,8 @@ class GRAFTTrainer:
                         self.accelerator.wait_for_everyone()
                         self.encoder.train()
                         self.gnn.train()
+
+            pbar.close()
 
         self._save_checkpoint("final")
         if self.accelerator.is_main_process:
