@@ -74,6 +74,15 @@ scripts/         # Shell scripts for train/eval/prep/augment
 
 See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config schema (encoder, GNN, loss weights, training params).
 
+### FAISS Index Types
+
+Configure index type in `index.type`:
+- **`hnsw`** (default): Fast approximate search (~99% recall, recommended for <1M docs)
+- **`flat`**: Exact search (100% recall, slower)
+- **`ivf`**: Inverted file index for very large corpora (1M+ docs)
+
+Params like `hnsw_m`, `hnsw_ef_construction`, `ivf_nlist` control speed/accuracy tradeoffs.
+
 ## Losses
 
 - **InfoNCE (q→d)**: Query-to-document supervised retrieval

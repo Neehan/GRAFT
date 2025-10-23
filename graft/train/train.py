@@ -13,6 +13,7 @@ from datasets import load_dataset
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 warnings.filterwarnings("ignore", message=".*Pydantic.*")
+warnings.filterwarnings("ignore", message=".*UnsupportedFieldAttributeWarning.*")
 
 from graft.models.encoder import Encoder
 from graft.models.gnn import GraphSAGE
@@ -296,6 +297,10 @@ class GRAFTTrainer:
                 pbar.set_postfix(
                     {"loss": f"{loss.item():.4f}", "step": self.global_step}
                 )
+
+                del batch, step_output, loss, loss_q2d, loss_nbr
+                if self.global_step % 10 == 0:
+                    torch.cuda.empty_cache()
 
                 if self.global_step % self.cfg["train"]["eval_every_steps"] == 0:
                     logger.info(f"Running evaluation at step {self.global_step}...")
