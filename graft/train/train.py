@@ -85,6 +85,8 @@ class GRAFTTrainer:
             freeze_layers=self.cfg["encoder"]["freeze_layers"],
         )
 
+        self.tokenizer = self.encoder.tokenizer
+
         self.gnn = GraphSAGE(
             in_dim=self.cfg["gnn"]["hidden_dim"],
             hidden_dim=self.cfg["gnn"]["hidden_dim"],
@@ -144,7 +146,7 @@ class GRAFTTrainer:
 
     def _tokenize(self, texts):
         """DRY helper for tokenization."""
-        return self.encoder.tokenizer(
+        return self.tokenizer(
             texts,
             max_length=self.cfg["encoder"]["max_len"],
             padding=True,

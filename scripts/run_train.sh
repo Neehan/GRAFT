@@ -22,11 +22,29 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 CONFIG_PATH=${1:-configs/hotpot_e5_sage.yml}
 
+# Debug GPU allocation
+echo "SLURM_GPUS: $SLURM_GPUS"
+echo "SLURM_GPUS_ON_NODE: $SLURM_GPUS_ON_NODE"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+echo "Available GPUs via nvidia-smi:"
+nvidia-smi --list-gpus
+
+# Get actual number of visible GPUs
+if [ -n "$CUDA_VISIBLE_DEVICES" ]; then
+    NUM_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+else
+    NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
+fi
+
 echo "Training GRAFT with config: $CONFIG_PATH"
-echo "Using $(nvidia-smi --list-gpus | wc -l) GPUs"
+echo "Using $NUM_GPUS GPUs for training"
+
+export PYTHONWARNINGS="ignore::pydantic._internal._generate_schema.UnsupportedFieldAttributeWarning"
 
 accelerate launch \
-    --num_processes 4 \
+    --num_processes $NUM_GPUS \
+    --num_machines 1 \
+    --dynamo_backend no \
     --multi_gpu \
     --mixed_precision bf16 \
     graft/train/train.py "$CONFIG_PATH"
