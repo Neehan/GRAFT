@@ -26,7 +26,7 @@ GRAFT uses HuggingFace `datasets` to automatically download HotpotQA. No manual 
 
 ### 1. Prepare data
 ```bash
-bash scripts/prepare_data.sh ./datasets/hotpot
+bash scripts/prepare_data.sh configs/hotpot_e5_sage.yml
 ```
 
 ### 2. Train
@@ -34,9 +34,11 @@ bash scripts/prepare_data.sh ./datasets/hotpot
 bash scripts/run_train.sh configs/hotpot_e5_sage.yml
 ```
 
+If `semantic_k` is set and augmented graph doesn't exist, training will build it automatically. Augmented graphs are cached for reuse.
+
 ### 3. Evaluate GRAFT (embed + build index + compute metrics)
 ```bash
-bash scripts/run_eval_graft.sh \
+scripts/run_eval_graft.sh \
   outputs/graft_hotpot_e5_sage/encoder_best.pt \
   configs/hotpot_e5_sage.yml \
   outputs/graft_hotpot_e5_sage \
@@ -47,7 +49,7 @@ This runs the full GRAFT eval pipeline: embeds corpus with trained encoder, buil
 
 ### 4. Run baselines (for final paper results)
 ```bash
-bash scripts/run_baselines.sh configs/hotpot_e5_sage.yml outputs/baselines_test test
+scripts/run_baselines.sh configs/hotpot_e5_sage.yml outputs/baselines_test test
 ```
 
 This runs all baselines on the test split (BM25, Zero-shot E5) and saves results. **Run this ONCE** for final paper evaluation.
@@ -56,12 +58,13 @@ This runs all baselines on the test split (BM25, Zero-shot E5) and saves results
 
 ```
 graft/
-  data/          # Graph & query-doc pair builders
+  data/          # Graph builders, kNN augmentation, query-doc pairs
   models/        # Encoder (HF), GNN (GraphSAGE)
-  train/         # Training loop, losses, sampler, hard-neg mining
+  train/         # Training loop, losses, sampler
   eval/          # Corpus embedding, FAISS, metrics (R@K, nDCG, MRR)
+baselines/       # BM25, Zero-shot retrievers
 configs/         # YAML configs
-scripts/         # Shell scripts for train/eval/prep
+scripts/         # Shell scripts for train/eval/prep/augment
 ```
 
 ## Config

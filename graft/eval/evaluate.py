@@ -4,6 +4,7 @@ import argparse
 import logging
 import yaml
 import torch
+from pathlib import Path
 from datasets import load_dataset
 
 from baselines.retrievers import GRAFTRetriever, ZeroShotRetriever, BM25Retriever
@@ -48,7 +49,20 @@ def main():
 
     logger.info(f"Loading HotpotQA {args.split} split and graph...")
     dataset = load_dataset("hotpot_qa", "distractor", split=args.split)
-    graph = torch.load(config["data"]["graph_path"], weights_only=False)
+
+    graph_dir = Path(config["data"]["graph_dir"])
+    graph_name = config["data"]["graph_name"]
+    semantic_k = config["data"].get("semantic_k")
+    knn_only = config["data"].get("knn_only", False)
+
+    if semantic_k is None:
+        graph_path = graph_dir / f"{graph_name}.pt"
+    else:
+        suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+        graph_path = graph_dir / f"{graph_name}{suffix}.pt"
+
+    logger.info(f"Loading graph from {graph_path}")
+    graph = torch.load(str(graph_path), weights_only=False)
 
     logger.info("Preparing queries...")
     queries = prepare_queries(dataset, graph.title_to_id)

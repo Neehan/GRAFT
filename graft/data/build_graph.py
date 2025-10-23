@@ -119,10 +119,11 @@ def _compute_graph_stats(edge_index, num_nodes):
     median_degree = degrees.float().median().item()
     max_degree = degrees.max().item()
 
+    num_isolated = (degrees == 0).sum().item()
+    pct_isolated = 100 * num_isolated / num_nodes if num_nodes > 0 else 0
+
     logger.info(
         f"Degree stats: mean={mean_degree:.2f}, std={std_degree:.2f}, "
         f"median={median_degree:.0f}, max={max_degree}"
     )
-    logger.info(
-        f"Suggested fanout: {int(mean_degree)} (mean) or {int(median_degree)} (median)"
-    )
+    logger.info(f"Isolated nodes: {num_isolated}/{num_nodes} ({pct_isolated:.1f}%)")

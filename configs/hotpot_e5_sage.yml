@@ -4,9 +4,12 @@ experiment:
 
 data:
   dataset: hotpot_qa
-  graph_path: ./datasets/hotpot/page_graph.pt
+  graph_dir: ./datasets/hotpot
+  graph_name: page_graph
   chunk_size: 220
   chunk_overlap: 40
+  semantic_k: 5 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
+  knn_only: false # If true, use only semantic edges (ablation)
 
 encoder:
   model_name: intfloat/e5-base-v2
