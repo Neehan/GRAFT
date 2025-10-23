@@ -149,15 +149,26 @@ class GRAFTTrainer:
             self.accelerator.prepare(self.encoder, self.gnn, optimizer, scheduler)
         )
 
-    def _tokenize(self, texts):
-        """DRY helper for tokenization."""
-        return self.tokenizer(
+    def _encode_texts(self, texts):
+        """Tokenize and encode texts in batches."""
+        encoded = self.tokenizer(
             texts,
             max_length=self.cfg["encoder"]["max_len"],
             padding=True,
             truncation=True,
             return_tensors="pt",
         )
+
+        embeds_list = []
+        batch_size = self.cfg["encoder"]["batch_size"]
+        num_texts = encoded["input_ids"].size(0)
+
+        for i in range(0, num_texts, batch_size):
+            ids = encoded["input_ids"][i : i + batch_size].to(self.device)
+            mask = encoded["attention_mask"][i : i + batch_size].to(self.device)
+            embeds_list.append(self.encoder(ids, mask))
+
+        return torch.cat(embeds_list, dim=0)
 
     def _build_fixed_eval_set(self, dev_pairs):
         """Build fixed evaluation set with pre-sampled negatives for consistency."""
@@ -191,116 +202,48 @@ class GRAFTTrainer:
 
     def _training_step(self, batch):
         """Single training step."""
+        # Get texts
         queries = batch["queries"]
-        pos_nodes = batch["pos_nodes"]
-        subgraph = batch["subgraph"]
-
-        if self.accelerator.is_main_process and self.global_step <= 5:
-            print(f"\n=== STEP {self.global_step} ===")
-            print(f"pos_nodes: shape={pos_nodes.shape}, device={pos_nodes.device}")
-            print(
-                f"edge_index: shape={subgraph.edge_index.shape}, device={subgraph.edge_index.device}"
-            )
-
-        subgraph_node_ids = subgraph.n_id
-        subgraph_texts = [
-            self.graph.node_text[int(nid)] for nid in subgraph.n_id_cpu.numpy()
+        node_texts = [
+            self.graph.node_text[int(nid)] for nid in batch["subgraph"].n_id_cpu.numpy()
         ]
 
-        # Encode queries + nodes in ONE forward pass to avoid internal state conflicts
-        all_texts = queries + subgraph_texts
-        all_encoded = self._tokenize(all_texts)
+        # Encode queries + nodes together
+        all_embeds = self._encode_texts(queries + node_texts)
+        query_embeds = all_embeds[: len(queries)]
+        node_embeds = all_embeds[len(queries) :]
 
-        # Single batched forward pass
-        encoder_batch_size = self.cfg["encoder"]["batch_size"]
-        all_embeds_list = []
-        num_texts = all_encoded["input_ids"].size(0)
+        # GNN forward
+        edge_index = batch["subgraph"].edge_index.to(self.device)
+        node_embeds = self.gnn(node_embeds, edge_index)
 
-        for i in range(0, num_texts, encoder_batch_size):
-            batch_input_ids = (
-                all_encoded["input_ids"][i : i + encoder_batch_size]
-                .clone()
-                .to(self.device)
-            )
-            batch_attention_mask = (
-                all_encoded["attention_mask"][i : i + encoder_batch_size]
-                .clone()
-                .to(self.device)
-            )
+        # Labels: find positive node indices in subgraph
+        labels = (
+            batch["subgraph"].n_id.unsqueeze(1).to(self.device)
+            == batch["pos_nodes"].unsqueeze(0).to(self.device)
+        ).nonzero()[:, 0]
 
-            if self.accelerator.is_main_process and self.global_step <= 5 and i == 0:
-                print(
-                    f"batch_input_ids: shape={batch_input_ids.shape}, requires_grad={batch_input_ids.requires_grad}, is_leaf={batch_input_ids.is_leaf}"
-                )
-
-            batch_embeds = self.encoder(batch_input_ids, batch_attention_mask)
-            all_embeds_list.append(batch_embeds)
-
-        all_embeds = torch.cat(all_embeds_list, dim=0)
-
-        # Split back into query and node embeddings
-        num_queries = len(queries)
-        query_embeds = all_embeds[:num_queries]
-        node_embeds_raw = all_embeds[num_queries:]
-
-        edge_index_gpu = subgraph.edge_index.clone().to(self.device)
-
-        if self.accelerator.is_main_process and self.global_step <= 5:
-            print(
-                f"edge_index_gpu: shape={edge_index_gpu.shape}, requires_grad={edge_index_gpu.requires_grad}, is_leaf={edge_index_gpu.is_leaf}"
-            )
-
-        node_embeds_gnn = self.gnn(node_embeds_raw, edge_index_gpu)
-
-        # Vectorized index lookup - avoid Python loop with .item() syncs
-        pos_nodes_tensor = pos_nodes.clone().to(self.device)
-        subgraph_node_ids_gpu = subgraph_node_ids.clone().to(self.device)
-        pos_indices_in_subgraph = (
-            (subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0))
-            .nonzero()[:, 0]
-            .clone()
-        )
-
-        labels = pos_indices_in_subgraph
-
-        if self.accelerator.is_main_process and self.global_step <= 5:
-            print(
-                f"labels: shape={labels.shape}, requires_grad={labels.requires_grad}, is_leaf={labels.is_leaf}"
-            )
-
-        pos_edges_gpu = (
-            batch.get("pos_edges").clone().to(self.device)
-            if batch.get("pos_edges") is not None
-            else None
-        )
-        neg_edges_gpu = (
-            batch.get("neg_edges").clone().to(self.device)
-            if batch.get("neg_edges") is not None
-            else None
-        )
-
-        if self.accelerator.is_main_process and self.global_step <= 5:
-            if pos_edges_gpu is not None:
-                print(
-                    f"pos_edges_gpu: shape={pos_edges_gpu.shape}, requires_grad={pos_edges_gpu.requires_grad}, is_leaf={pos_edges_gpu.is_leaf}"
-                )
-            if neg_edges_gpu is not None:
-                print(
-                    f"neg_edges_gpu: shape={neg_edges_gpu.shape}, requires_grad={neg_edges_gpu.requires_grad}, is_leaf={neg_edges_gpu.is_leaf}"
-                )
-
+        # Loss
         loss, loss_q2d, loss_nbr = compute_total_loss(
             query_embeds=query_embeds,
-            doc_embeds=node_embeds_gnn,
+            doc_embeds=node_embeds,
             labels=labels,
-            node_embeds=node_embeds_gnn,
-            edge_index=edge_index_gpu,
-            pos_edges=pos_edges_gpu,
-            neg_edges=neg_edges_gpu,
-            lambda_q2d=self.cfg["loss"]["lambda_q2d"],
-            tau=self.cfg["loss"]["tau"],
-            tau_graph=self.cfg["loss"]["tau_graph"],
-            alpha_link=self.cfg["loss"]["alpha_link"],
+            node_embeds=node_embeds,
+            edge_index=edge_index,
+            pos_edges=(
+                batch.get("pos_edges").to(self.device)
+                if batch.get("pos_edges") is not None
+                else None
+            ),
+            neg_edges=(
+                batch.get("neg_edges").to(self.device)
+                if batch.get("neg_edges") is not None
+                else None
+            ),
+            **{
+                k: self.cfg["loss"][k]
+                for k in ["lambda_q2d", "tau", "tau_graph", "alpha_link"]
+            },
         )
 
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
@@ -371,9 +314,6 @@ class GRAFTTrainer:
 
     def train(self):
         """Main training loop."""
-        # Enable anomaly detection to find the problematic operation
-        torch.autograd.set_detect_anomaly(True)
-
         if self.accelerator.is_main_process:
             logger.info("Running zero-shot evaluation...")
             # zero_shot_recall = self._evaluate()
