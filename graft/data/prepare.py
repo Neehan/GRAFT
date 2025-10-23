@@ -20,20 +20,17 @@ def prepare_hotpot_data(config, split="train"):
     base_graph_path = output_dir / f"{graph_name}.pt"
 
     # Step 1: Build base graph
-    if not base_graph_path.exists():
-        logger.info(f"Loading HotpotQA {split} split...")
-        dataset = load_dataset("hotpot_qa", "distractor", split=split)
+    logger.info(f"Loading HotpotQA {split} split...")
+    dataset = load_dataset("hotpot_qa", "distractor", split=split)
 
-        chunk_size = config["data"]["chunk_size"]
-        chunk_overlap = config["data"]["chunk_overlap"]
+    chunk_size = config["data"]["chunk_size"]
+    chunk_overlap = config["data"]["chunk_overlap"]
 
-        logger.info(
-            f"Building base graph with chunk_size={chunk_size}, overlap={chunk_overlap}..."
-        )
-        build_hotpot_graph(dataset, str(base_graph_path), chunk_size, chunk_overlap)
-        logger.info(f"Base graph created: {base_graph_path}")
-    else:
-        logger.info(f"Base graph already exists: {base_graph_path}")
+    logger.info(
+        f"Building base graph with chunk_size={chunk_size}, overlap={chunk_overlap}..."
+    )
+    build_hotpot_graph(dataset, str(base_graph_path), chunk_size, chunk_overlap)
+    logger.info(f"Base graph created: {base_graph_path}")
 
     # Step 2: Augment with kNN if configured
     semantic_k = config["data"].get("semantic_k")
@@ -42,23 +39,18 @@ def prepare_hotpot_data(config, split="train"):
         suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
         augmented_path = output_dir / f"{graph_name}{suffix}.pt"
 
-        if augmented_path.exists():
-            logger.info(
-                f"Augmented Semantic kNN graph already exists: {augmented_path}"
-            )
-        else:
-            logger.info(
-                f"Augmenting graph with Semantic kNN (k={semantic_k}, knn_only={knn_only})..."
-            )
-            augment_with_knn(
-                str(base_graph_path),
-                str(augmented_path),
-                config,
-                semantic_k,
-                knn_only,
-                force_recompute=False,
-            )
-            logger.info(f"Augmented graph created: {augmented_path}")
+        logger.info(
+            f"Augmenting graph with Semantic kNN (k={semantic_k}, knn_only={knn_only})..."
+        )
+        augment_with_knn(
+            str(base_graph_path),
+            str(augmented_path),
+            config,
+            semantic_k,
+            knn_only,
+            force_recompute=True,
+        )
+        logger.info(f"Augmented graph created: {augmented_path}")
 
         logger.info(f"Data preparation complete! Final graph: {augmented_path}")
     else:
