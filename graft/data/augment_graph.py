@@ -141,8 +141,19 @@ def build_knn_edges(embeddings, k, config):
     embeddings = embeddings.astype(np.float32)
     embeddings = np.ascontiguousarray(embeddings)
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
     index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
+
+    if torch.cuda.is_available():
+        ngpus = torch.cuda.device_count()
+        if ngpus > 1:
+            index = faiss.index_cpu_to_all_gpus(index)
+            logger.info(f"FAISS index replicated across {ngpus} GPUs")
+        else:
+            res = faiss.StandardGpuResources()
+            index = faiss.index_cpu_to_gpu(res, 0, index)
+            logger.info("FAISS index moved to GPU 0")
 
     batch_size = config["data"]["batch_size"]
     logger.info(f"Querying k={k} nearest neighbors with batch_size={batch_size}...")
