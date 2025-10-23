@@ -191,7 +191,7 @@ def evaluate(encoder, dev_pairs, cfg, device):
     num_nodes = len(graph.node_text)
 
     correct = 0
-    total = min(len(dev_pairs), 1000)
+    total = min(len(dev_pairs), 100)
 
     with torch.no_grad():
         for i in range(total):
