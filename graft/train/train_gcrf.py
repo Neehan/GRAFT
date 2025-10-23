@@ -107,7 +107,7 @@ def train(config_path):
             query_embeds = encoder(query_encoded["input_ids"], query_encoded["attention_mask"])
 
             all_node_ids = torch.cat([pos_nodes, neg_nodes])
-            node_texts = [graph.node_text[nid] for nid in all_node_ids.cpu().numpy()]
+            node_texts = [graph.node_text[int(nid)] for nid in all_node_ids.cpu().numpy()]
 
             node_encoded = encoder.tokenizer(
                 node_texts,
