@@ -222,12 +222,12 @@ class GRAFTTrainer:
 
         node_embeds_raw = torch.cat(node_embeds_list, dim=0)
 
-        edge_index_gpu = subgraph.edge_index.to(self.device)
+        edge_index_gpu = subgraph.edge_index.clone().to(self.device)
         node_embeds_gnn = self.gnn(node_embeds_raw, edge_index_gpu)
 
         # Vectorized index lookup - avoid Python loop with .item() syncs
-        pos_nodes_tensor = torch.tensor(pos_nodes, device=self.device)
-        subgraph_node_ids_gpu = subgraph_node_ids.to(self.device)
+        pos_nodes_tensor = pos_nodes.clone().to(self.device)
+        subgraph_node_ids_gpu = subgraph_node_ids.clone().to(self.device)
         pos_indices_in_subgraph = (
             subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
         ).nonzero()[:, 0]
@@ -235,12 +235,12 @@ class GRAFTTrainer:
         labels = pos_indices_in_subgraph
 
         pos_edges_gpu = (
-            batch.get("pos_edges").to(self.device)
+            batch.get("pos_edges").clone().to(self.device)
             if batch.get("pos_edges") is not None
             else None
         )
         neg_edges_gpu = (
-            batch.get("neg_edges").to(self.device)
+            batch.get("neg_edges").clone().to(self.device)
             if batch.get("neg_edges") is not None
             else None
         )
