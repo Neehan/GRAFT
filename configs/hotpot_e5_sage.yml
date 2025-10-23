@@ -24,7 +24,7 @@ gnn:
   layers: 2
   hidden_dim: 768
   dropout: 0.1
-  fanouts: [5, 3]
+  fanouts: [4, 2]
 
 loss:
   tau: 0.1
@@ -48,9 +48,9 @@ train:
 
 eval:
   num_samples: 500
-  num_negatives: 300
-  recall_k: 10
-  query_batch_size: 8
+  num_negatives: 200
+  recall_k: 5
+  query_batch_size: 16
   encoder_batch_size: 128
 
 index:
