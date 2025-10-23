@@ -32,6 +32,11 @@ class GRAFTTrainer:
         with open(config_path) as f:
             self.cfg = yaml.safe_load(f)
 
+        # Set seed for reproducibility
+        seed = self.cfg["train"]["seed"]
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.cfg["train"][
                 "gradient_accumulation_steps"
@@ -102,10 +107,10 @@ class GRAFTTrainer:
         self.graph = torch.load(graph_path, weights_only=False)
 
         train_pairs = load_query_pairs(
-            "train", graph_path, log=self.accelerator.is_main_process
+            "train", graph_path, self.cfg, log=self.accelerator.is_main_process
         )
         dev_pairs = load_query_pairs(
-            "dev", graph_path, log=self.accelerator.is_main_process
+            "dev", graph_path, self.cfg, log=self.accelerator.is_main_process
         )
 
         with self.accelerator.main_process_first():
@@ -150,7 +155,7 @@ class GRAFTTrainer:
         )
 
     def _encode_texts(self, texts):
-        """Tokenize and encode texts in batches."""
+        """Tokenize and encode texts in one forward pass."""
         encoded = self.tokenizer(
             texts,
             max_length=self.cfg["encoder"]["max_len"],
@@ -158,17 +163,9 @@ class GRAFTTrainer:
             truncation=True,
             return_tensors="pt",
         )
-
-        embeds_list = []
-        batch_size = self.cfg["encoder"]["batch_size"]
-        num_texts = encoded["input_ids"].size(0)
-
-        for i in range(0, num_texts, batch_size):
-            ids = encoded["input_ids"][i : i + batch_size].to(self.device)
-            mask = encoded["attention_mask"][i : i + batch_size].to(self.device)
-            embeds_list.append(self.encoder(ids, mask))
-
-        return torch.cat(embeds_list, dim=0)
+        ids = encoded["input_ids"].to(self.device)
+        mask = encoded["attention_mask"].to(self.device)
+        return self.encoder(ids, mask)
 
     def _build_fixed_eval_set(self, dev_pairs):
         """Build fixed evaluation set with pre-sampled negatives for consistency."""
@@ -203,16 +200,13 @@ class GRAFTTrainer:
     def _training_step(self, batch):
         """Single training step."""
         # Encode queries
-        with torch.no_grad():
-            query_embeds = self._encode_texts(batch["queries"])
+        query_embeds = self._encode_texts(batch["queries"])
 
         # Encode nodes
-        with torch.no_grad():
-            node_texts = [
-                self.graph.node_text[int(nid)]
-                for nid in batch["subgraph"].n_id_cpu.numpy()
-            ]
-            node_embeds = self._encode_texts(node_texts)
+        node_texts = [
+            self.graph.node_text[int(nid)] for nid in batch["subgraph"].n_id_cpu.numpy()
+        ]
+        node_embeds = self._encode_texts(node_texts)
 
         # GNN
         node_embeds = self.gnn(
@@ -279,8 +273,8 @@ class GRAFTTrainer:
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
 
-                # Sub-batch candidates to avoid OOM - use encoder batch size
-                candidate_batch_size = self.cfg["encoder"]["batch_size"]
+                # Sub-batch candidates to avoid OOM
+                candidate_batch_size = self.cfg["eval"]["encoder_batch_size"]
                 candidate_embeds_list = []
                 for i in range(0, len(all_candidates), candidate_batch_size):
                     batch = all_candidates[i : i + candidate_batch_size]

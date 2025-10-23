@@ -24,9 +24,8 @@ def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):
     if edge_index.size(1) == 0:
         return torch.tensor(0.0, device=node_embeds.device)
 
-    src = edge_index[0].contiguous()
-    dst = edge_index[1].contiguous()
-    num_edges = edge_index.size(1)
+    src = edge_index[0]
+    dst = edge_index[1]
 
     pos_scores = (node_embeds[src] * node_embeds[dst]).sum(dim=1) / tau_graph
 
@@ -44,13 +43,8 @@ def link_prediction_loss(node_embeds, pos_edges, neg_edges):
     pos_edges: (2, E_pos)
     neg_edges: (2, E_neg)
     """
-    pos_src = pos_edges[0].contiguous()
-    pos_dst = pos_edges[1].contiguous()
-    neg_src = neg_edges[0].contiguous()
-    neg_dst = neg_edges[1].contiguous()
-
-    pos_scores = (node_embeds[pos_src] * node_embeds[pos_dst]).sum(dim=1)
-    neg_scores = (node_embeds[neg_src] * node_embeds[neg_dst]).sum(dim=1)
+    pos_scores = (node_embeds[pos_edges[0]] * node_embeds[pos_edges[1]]).sum(dim=1)
+    neg_scores = (node_embeds[neg_edges[0]] * node_embeds[neg_edges[1]]).sum(dim=1)
 
     pos_loss = F.binary_cross_entropy_with_logits(
         pos_scores, torch.ones_like(pos_scores)

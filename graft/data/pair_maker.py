@@ -7,19 +7,21 @@ from datasets import load_dataset
 logger = logging.getLogger(__name__)
 
 
-def load_query_pairs(split, graph_path, log=True):
-    """Load query-doc pairs from mteb/hotpotqa (chunked graph).
+def load_query_pairs(split, graph_path, config, log=True):
+    """Load query-doc pairs from HF dataset (chunked graph).
 
     Args:
         split: Dataset split (train/dev/test)
         graph_path: Path to graph .pt file
+        config: Config dict with dataset name
         log: Whether to log the loading info
     """
     graph = torch.load(graph_path, weights_only=False)
     doc_id_to_node_ids = graph.doc_id_to_node_ids
 
-    queries_ds = load_dataset("mteb/hotpotqa", "queries", split="queries")
-    qrels_ds = load_dataset("mteb/hotpotqa", "default", split=split)
+    dataset = config["data"]["dataset"]
+    queries_ds = load_dataset(dataset, "queries", split="queries")
+    qrels_ds = load_dataset(dataset, "default", split=split)
 
     qid_to_query = {item["_id"]: item["text"] for item in queries_ds}
 

@@ -18,18 +18,7 @@ class Encoder(nn.Module):
                 param.requires_grad = False
 
     def forward(self, input_ids, attention_mask):
-        # Explicitly create position_ids to prevent internal buffer caching issues
-        seq_length = input_ids.size(1)
-        position_ids = torch.arange(
-            seq_length, dtype=torch.long, device=input_ids.device
-        )
-        position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
-
-        outputs = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-        )
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
 
         if self.pool == "cls":
             embeddings = outputs.last_hidden_state[:, 0]

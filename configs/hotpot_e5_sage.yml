@@ -19,10 +19,8 @@ encoder:
   max_len: 256
   pool: cls
   freeze_layers: 0
-  batch_size: 128
 
 gnn:
-  type: graphsage
   layers: 1
   hidden_dim: 768
   dropout: 0.1
@@ -53,6 +51,7 @@ eval:
   num_negatives: 300
   recall_k: 10
   query_batch_size: 32
+  encoder_batch_size: 128
 
 index:
   type: hnsw # Index type: "flat", "hnsw", or "ivf"
