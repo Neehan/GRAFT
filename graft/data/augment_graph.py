@@ -220,7 +220,7 @@ def augment_with_knn(
         logger.info(
             f"Mode: Hybrid - keeping structural edges + adding semantic kNN edges"
         )
-        existing_edges = graph.edge_index.T.tolist()
+        existing_edges = [tuple(e) for e in graph.edge_index.T.tolist()]
         combined_edges = list(set(existing_edges + knn_edges))
         new_edge_index = torch.tensor(combined_edges, dtype=torch.long).T
 
