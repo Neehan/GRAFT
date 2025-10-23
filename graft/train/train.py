@@ -203,10 +203,9 @@ class GRAFTTrainer:
             )
 
         query_encoded = self._tokenize(queries)
-        query_embeds = self.encoder(
-            query_encoded["input_ids"].to(self.device),
-            query_encoded["attention_mask"].to(self.device),
-        )
+        query_input_ids = query_encoded["input_ids"].clone().to(self.device)
+        query_attention_mask = query_encoded["attention_mask"].clone().to(self.device)
+        query_embeds = self.encoder(query_input_ids, query_attention_mask)
 
         subgraph_node_ids = subgraph.n_id
         subgraph_texts = [
@@ -221,12 +220,16 @@ class GRAFTTrainer:
         num_nodes = node_encoded["input_ids"].size(0)
 
         for i in range(0, num_nodes, encoder_batch_size):
-            batch_input_ids = node_encoded["input_ids"][i : i + encoder_batch_size].to(
-                self.device
+            batch_input_ids = (
+                node_encoded["input_ids"][i : i + encoder_batch_size]
+                .clone()
+                .to(self.device)
             )
-            batch_attention_mask = node_encoded["attention_mask"][
-                i : i + encoder_batch_size
-            ].to(self.device)
+            batch_attention_mask = (
+                node_encoded["attention_mask"][i : i + encoder_batch_size]
+                .clone()
+                .to(self.device)
+            )
 
             if self.accelerator.is_main_process and self.global_step <= 5 and i == 0:
                 print(
