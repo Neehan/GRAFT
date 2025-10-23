@@ -12,6 +12,7 @@ from transformers import get_cosine_schedule_with_warmup
 from datasets import load_dataset
 
 warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 import os
 
 os.environ["PYTHONWARNINGS"] = "ignore"
@@ -100,8 +101,12 @@ class GRAFTTrainer:
         graph_path = self._get_graph_path()
         self.graph = torch.load(graph_path, weights_only=False)
 
-        train_pairs = load_query_pairs("train", graph_path)
-        dev_pairs = load_query_pairs("dev", graph_path)
+        train_pairs = load_query_pairs(
+            "train", graph_path, log=self.accelerator.is_main_process
+        )
+        dev_pairs = load_query_pairs(
+            "dev", graph_path, log=self.accelerator.is_main_process
+        )
 
         with self.accelerator.main_process_first():
             self.sampler = GraphBatchSampler(
@@ -217,7 +222,8 @@ class GRAFTTrainer:
 
         node_embeds_raw = torch.cat(node_embeds_list, dim=0)
 
-        node_embeds_gnn = self.gnn(node_embeds_raw, subgraph.edge_index.to(self.device))
+        edge_index_gpu = subgraph.edge_index.to(self.device)
+        node_embeds_gnn = self.gnn(node_embeds_raw, edge_index_gpu)
 
         # Vectorized index lookup - avoid Python loop with .item() syncs
         pos_nodes_tensor = torch.tensor(pos_nodes, device=self.device)
@@ -228,14 +234,25 @@ class GRAFTTrainer:
 
         labels = pos_indices_in_subgraph
 
+        pos_edges_gpu = (
+            batch.get("pos_edges").to(self.device)
+            if batch.get("pos_edges") is not None
+            else None
+        )
+        neg_edges_gpu = (
+            batch.get("neg_edges").to(self.device)
+            if batch.get("neg_edges") is not None
+            else None
+        )
+
         loss, loss_q2d, loss_nbr = compute_total_loss(
             query_embeds=query_embeds,
             doc_embeds=node_embeds_gnn,
             labels=labels,
             node_embeds=node_embeds_gnn,
-            edge_index=subgraph.edge_index.to(self.device),
-            pos_edges=batch.get("pos_edges"),
-            neg_edges=batch.get("neg_edges"),
+            edge_index=edge_index_gpu,
+            pos_edges=pos_edges_gpu,
+            neg_edges=neg_edges_gpu,
             lambda_q2d=self.cfg["loss"]["lambda_q2d"],
             tau=self.cfg["loss"]["tau"],
             tau_graph=self.cfg["loss"]["tau_graph"],

@@ -39,7 +39,7 @@ fi
 echo "Training GRAFT with config: $CONFIG_PATH"
 echo "Using $NUM_GPUS GPUs for training"
 
-export PYTHONWARNINGS="ignore::pydantic._internal._generate_schema.UnsupportedFieldAttributeWarning"
+export PYTHONWARNINGS="ignore::UserWarning"
 
 accelerate launch \
     --num_processes $NUM_GPUS \
