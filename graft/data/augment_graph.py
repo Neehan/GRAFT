@@ -137,10 +137,12 @@ def build_knn_edges(embeddings, k, config):
     """
     num_nodes, dim = embeddings.shape
 
-    logger.info(f"Building FAISS index for {num_nodes} nodes...")
+    logger.info(f"Converting embeddings to float32...")
     embeddings = embeddings.astype(np.float32)
     embeddings = np.ascontiguousarray(embeddings)
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
+    logger.info(f"Building FAISS index for {num_nodes} nodes...")
 
     index = faiss.IndexFlatIP(dim)
     logger.info(f"Adding {num_nodes} vectors to index...")
