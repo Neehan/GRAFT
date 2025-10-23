@@ -199,14 +199,16 @@ class GRAFTTrainer:
 
     def _training_step(self, batch):
         """Single training step."""
-        # Encode queries
-        query_embeds = self._encode_texts(batch["queries"])
+        # Encode queries (temporarily frozen for debugging)
+        with torch.no_grad():
+            query_embeds = self._encode_texts(batch["queries"])
 
-        # Encode nodes
+        # Encode nodes (temporarily frozen for debugging)
         node_texts = [
             self.graph.node_text[int(nid)] for nid in batch["subgraph"].n_id_cpu.numpy()
         ]
-        node_embeds = self._encode_texts(node_texts)
+        with torch.no_grad():
+            node_embeds = self._encode_texts(node_texts)
 
         # GNN
         node_embeds = self.gnn(

@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv
 
 
@@ -19,6 +20,6 @@ class GraphSAGE(nn.Module):
         for i, layer in enumerate(self.layers):
             x = layer(x, edge_index)
             if i < len(self.layers) - 1:
-                x = torch.relu(x)
-                x = torch.dropout(x, p=self.dropout, train=self.training)
+                x = F.relu(x)
+                x = F.dropout(x, p=self.dropout, training=self.training)
         return x
