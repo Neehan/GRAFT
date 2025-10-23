@@ -142,11 +142,44 @@ def build_knn_edges(embeddings, k, config):
     embeddings = np.ascontiguousarray(embeddings)
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
-    logger.info(f"Building FAISS index for {num_nodes} nodes...")
+    index_type = config["index"]["type"]
 
-    index = faiss.IndexFlatIP(dim)
-    index.add(embeddings)
-    logger.info(f"FAISS index built on CPU ({num_nodes} vectors, using CPU for search)")
+    if index_type == "ivf":
+        nlist = config["index"]["ivf_nlist"]
+        nprobe = config["index"]["ivf_nprobe"]
+        m = config["index"]["hnsw_m"]
+
+        logger.info(
+            f"Building IVF index: {num_nodes} nodes, nlist={nlist}, nprobe={nprobe}"
+        )
+        quantizer = faiss.IndexHNSWFlat(dim, m)
+        index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+        index.train(embeddings)
+        index.add(embeddings)
+        index.nprobe = nprobe
+        logger.info("IVF index built")
+    elif index_type == "hnsw":
+        m = config["index"]["hnsw_m"]
+        ef_construction = config["index"]["hnsw_ef_construction"]
+        ef_search = config["index"]["hnsw_ef_search"]
+
+        logger.info(
+            f"Building HNSW index: {num_nodes} nodes, M={m}, efC={ef_construction}, efS={ef_search}"
+        )
+        index = faiss.IndexHNSWFlat(dim, m)
+        index.hnsw.efConstruction = ef_construction
+        index.hnsw.efSearch = ef_search
+        index.add(embeddings)
+        logger.info("HNSW index built")
+    elif index_type == "flat":
+        logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
+        index = faiss.IndexFlatIP(dim)
+        index.add(embeddings)
+        logger.info("Flat index built")
+    else:
+        raise ValueError(
+            f"Unknown index type: {index_type}. Use 'flat', 'hnsw', or 'ivf'"
+        )
 
     batch_size = config["data"]["batch_size"]
     logger.info(f"Starting kNN search: k={k}, batch_size={batch_size}...")

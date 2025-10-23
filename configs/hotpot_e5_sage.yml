@@ -11,6 +11,7 @@ data:
   batch_size: 2048 # Batch size for inference/embedding per GPU (2x L40S = 4096 total)
   semantic_k: 5 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
   knn_only: false # If true, use only semantic edges (ablation)
+  knn_index_type: hnsw # Index type for kNN search: "flat" (exact, slow) or "hnsw" (approximate, fast)
 
 encoder:
   model_name: intfloat/e5-base-v2
@@ -51,7 +52,10 @@ eval:
   recall_k: 10
 
 index:
-  faiss_type: IVF,HNSW
-  nlist: 4096
-  nprobe: 32
+  type: hnsw # Index type: "flat", "hnsw", or "ivf"
+  hnsw_m: 32
+  hnsw_ef_construction: 40
+  hnsw_ef_search: 16
+  ivf_nlist: 4096
+  ivf_nprobe: 32
   topk: 50
