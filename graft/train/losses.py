@@ -28,13 +28,19 @@ def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):
     num_edges = edge_index.size(1)
 
     pos_scores = (node_embeds[src] * node_embeds[dst]).sum(dim=1) / tau_graph
+    print(f"DEBUG nbr_loss: pos_scores min={pos_scores.min()}, max={pos_scores.max()}, has_nan={torch.isnan(pos_scores).any()}")
 
     all_scores = torch.matmul(node_embeds[src], node_embeds.T) / tau_graph
+    print(f"DEBUG nbr_loss: all_scores min={all_scores.min()}, max={all_scores.max()}, has_nan={torch.isnan(all_scores).any()}")
 
     numerator = torch.exp(pos_scores)
+    print(f"DEBUG nbr_loss: numerator min={numerator.min()}, max={numerator.max()}, has_nan={torch.isnan(numerator).any()}")
+
     denominator = torch.exp(all_scores).sum(dim=1)
+    print(f"DEBUG nbr_loss: denominator min={denominator.min()}, max={denominator.max()}, has_nan={torch.isnan(denominator).any()}")
 
     loss = -torch.log(numerator / (denominator + 1e-8)).mean()
+    print(f"DEBUG nbr_loss: final loss={loss.item()}")
     return loss
 
 
