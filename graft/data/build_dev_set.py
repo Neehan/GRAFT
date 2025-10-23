@@ -14,11 +14,11 @@ def build_fixed_dev_set(graph, dev_pairs, config, output_path):
     Args:
         graph: Graph object with edge_index and node_text
         dev_pairs: List of dev query pairs from pair_maker
-        config: Config dict with eval settings
-        output_path: Path to save the eval set
+        config: Config dict with eval settings (num_samples, num_negatives)
+        output_path: Path to save the dev set
 
     Returns:
-        eval_set: List of dicts with query, candidates, num_positives
+        dev_set: List of dicts with query, candidates, num_positives
     """
     num_nodes = len(graph.node_text)
     num_samples = min(len(dev_pairs), config["eval"]["num_samples"])
@@ -30,7 +30,7 @@ def build_fixed_dev_set(graph, dev_pairs, config, output_path):
 
     edge_index = graph.edge_index
 
-    eval_set = []
+    dev_set = []
     for i in range(num_samples):
         pair = dev_pairs[i]
         pos_nodes = pair["pos_nodes"]
@@ -75,7 +75,7 @@ def build_fixed_dev_set(graph, dev_pairs, config, output_path):
         # Combine positives and negatives
         candidate_indices = pos_nodes + neg_nodes
 
-        eval_set.append(
+        dev_set.append(
             {
                 "query": pair["query"],
                 "qid": pair["qid"],
@@ -86,11 +86,11 @@ def build_fixed_dev_set(graph, dev_pairs, config, output_path):
 
     # Save to disk
     output_path = Path(output_path)
-    torch.save(eval_set, output_path)
+    torch.save(dev_set, output_path)
 
     logger.info(
-        f"Built fixed dev set: {len(eval_set)} queries, {total_candidates} total candidates each"
+        f"Built fixed dev set: {len(dev_set)} queries, {total_candidates} total candidates each"
     )
     logger.info(f"Saved dev set to: {output_path}")
 
-    return eval_set
+    return dev_set

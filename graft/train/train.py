@@ -131,8 +131,7 @@ class GRAFTTrainer:
                 f"{len(self.sampler)} batches per process, "
                 f"{len(self.sampler) * self.accelerator.num_processes} total batches"
             )
-            logger.info("Loading fixed dev set...")
-        self.eval_data = self._load_fixed_dev_set()
+        self.dev_data = self._load_fixed_dev_set()
 
     def _setup_training(self):
         optimizer = torch.optim.AdamW(
@@ -210,7 +209,7 @@ class GRAFTTrainer:
 
         if self.accelerator.is_main_process:
             logger.info(
-                f"Loaded fixed dev set from {dev_set_path}: {len(dev_set)} queries"
+                f"Loaded small dev set from {dev_set_path}: {len(dev_set)} queries"
             )
         return dev_set
 
@@ -234,25 +233,24 @@ class GRAFTTrainer:
             node_embeds, batch["subgraph"].edge_index.to(self.device)
         )
 
-        # Labels: Find indices of all positive nodes in subgraph for each query
-        # batch["pos_nodes"] is now a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
+        # Labels: Sample 1 positive per query to avoid averaging (which pulls query to centroid)
+        # batch["pos_nodes"] is a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
         subgraph_ids = batch["subgraph"].n_id.to(self.device)
 
-        labels_list = []
-        max_positives = max(len(pos_nodes) for pos_nodes in batch["pos_nodes"])
-
+        labels = []
         for pos_nodes in batch["pos_nodes"]:
             pos_tensor = torch.tensor(pos_nodes, device=self.device, dtype=torch.long)
             matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(dim=0)
             pos_indices = matches.nonzero(as_tuple=False).squeeze(-1)
 
-            while len(pos_indices) < max_positives:
-                pos_indices = torch.cat([pos_indices, pos_indices[:1]])
-            pos_indices = pos_indices[:max_positives]
+            # Randomly sample 1 positive (different each step for data augmentation)
+            if len(pos_indices) > 0:
+                random_idx = torch.randint(0, len(pos_indices), (1,)).item()
+                labels.append(pos_indices[random_idx])
+            else:
+                raise ValueError("No positives found for query")
 
-            labels_list.append(pos_indices)
-
-        labels = torch.stack(labels_list, dim=0)
+        labels = torch.stack(labels)
 
         # Loss
         loss, loss_q2d, loss_nbr = compute_total_loss(
@@ -286,7 +284,7 @@ class GRAFTTrainer:
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
         correct = 0
-        total = len(self.eval_data)
+        total = len(self.dev_data)
         recall_k = self.cfg["eval"]["recall_k"]
         query_batch_size = self.cfg["eval"]["query_batch_size"]
 
@@ -297,13 +295,13 @@ class GRAFTTrainer:
                 total=(total + query_batch_size - 1) // query_batch_size,
             ):
                 batch_end = min(batch_start + query_batch_size, total)
-                batch_items = self.eval_data[batch_start:batch_end]
+                batch_items = self.dev_data[batch_start:batch_end]
                 batch_size = len(batch_items)
 
                 queries = [item["query"] for item in batch_items]
                 query_embeds = unwrapped_encoder.encode(queries, self.device)
 
-                # All queries have same number of candidates now (fixed in _build_fixed_eval_set)
+                # All queries have same number of candidates now (fixed in _load_fixed_dev_set)
                 all_candidates = []
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
