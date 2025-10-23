@@ -171,14 +171,20 @@ class GRAFTTrainer:
         """Build fixed evaluation set with pre-sampled negatives for consistency."""
         num_nodes = len(self.graph.node_text)
         num_samples = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
-        num_negatives = self.cfg["eval"]["num_negatives"]
+        base_negatives = self.cfg["eval"]["num_negatives"]
+
+        # Find max positives to determine total candidates
+        max_positives = max(len(pair["pos_nodes"]) for pair in dev_pairs[:num_samples])
+        total_candidates = max_positives + base_negatives
 
         eval_set = []
         for i in range(num_samples):
             pair = dev_pairs[i]
             pos_nodes = pair["pos_nodes"]
 
-            neg_indices = torch.randint(0, num_nodes, (num_negatives,))
+            # Adjust negatives so all queries have same total candidates
+            num_negatives_for_query = total_candidates - len(pos_nodes)
+            neg_indices = torch.randint(0, num_nodes, (num_negatives_for_query,))
             candidate_indices = torch.cat([torch.tensor(pos_nodes), neg_indices])
             candidate_texts = [
                 self.graph.node_text[int(idx)] for idx in candidate_indices
@@ -194,7 +200,7 @@ class GRAFTTrainer:
 
         if self.accelerator.is_main_process:
             logger.info(
-                f"Built fixed eval set: {len(eval_set)} queries, {num_negatives} negatives each"
+                f"Built fixed eval set: {len(eval_set)} queries, {total_candidates} total candidates each (max {max_positives} positives + negatives)"
             )
         return eval_set
 
@@ -287,22 +293,20 @@ class GRAFTTrainer:
                 queries = [item["query"] for item in batch_items]
                 query_embeds = unwrapped_encoder.encode(queries, self.device)
 
+                # All queries have same number of candidates now (fixed in _build_fixed_eval_set)
                 all_candidates = []
-                num_candidates_per_query = len(batch_items[0]["candidate_texts"])
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
 
-                # Sub-batch candidates to avoid OOM
-                candidate_batch_size = self.cfg["eval"]["encoder_batch_size"]
-                candidate_embeds_list = []
-                for i in range(0, len(all_candidates), candidate_batch_size):
-                    batch = all_candidates[i : i + candidate_batch_size]
-                    batch_embeds = unwrapped_encoder.encode(batch, self.device)
-                    candidate_embeds_list.append(batch_embeds)
+                # Encode all candidates at once
+                all_candidate_embeds = unwrapped_encoder.encode(
+                    all_candidates, self.device
+                )
 
-                candidate_embeds = torch.cat(candidate_embeds_list, dim=0)
-                candidate_embeds = candidate_embeds.reshape(
-                    batch_size, num_candidates_per_query, -1
+                # Reshape into [batch_size, num_candidates, hidden_dim]
+                num_candidates = len(batch_items[0]["candidate_texts"])
+                candidate_embeds = all_candidate_embeds.reshape(
+                    batch_size, num_candidates, -1
                 )
 
                 scores = torch.bmm(
