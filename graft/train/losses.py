@@ -34,7 +34,7 @@ def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):
     numerator = torch.exp(pos_scores)
     denominator = torch.exp(all_scores).sum(dim=1)
 
-    loss = -torch.log(numerator / denominator + 1e-8).mean()
+    loss = -torch.log(numerator / (denominator + 1e-8)).mean()
     return loss
 
 
