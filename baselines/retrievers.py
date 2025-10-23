@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 class BaseRetriever:
     """Base class for all retriever methods."""
 
-    def search(self, query, k):
-        """Search for top-k documents given a query.
+    def search(self, queries, k):
+        """Search for top-k documents given query(ies).
 
         Args:
-            query: Query text string
+            queries: Query text string or list of query strings
             k: Number of documents to retrieve
 
         Returns:
-            List of document IDs (indices into corpus)
+            List of document IDs, or list of lists for batch
         """
         raise NotImplementedError
 
@@ -34,40 +34,74 @@ class ZeroShotRetriever(BaseRetriever):
     def __init__(self, model_name, index_path, config):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
+        self.num_gpus = torch.cuda.device_count()
         self._load_encoder(model_name)
         self._load_faiss_index(index_path)
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
-        self.encoder = load_zero_shot_encoder(model_name, self.config, self.device)
+        encoder = load_zero_shot_encoder(model_name, self.config, self.device)
+
+        if self.num_gpus > 1:
+            logger.info(f"Using {self.num_gpus} GPUs with DataParallel for encoder")
+            self.encoder = torch.nn.DataParallel(encoder)
+            self._is_parallel = True
+        else:
+            self.encoder = encoder
+            self._is_parallel = False
 
     def _load_faiss_index(self, index_path):
         logger.info(f"Loading FAISS index from {index_path}")
         index = faiss.read_index(index_path)
 
         if self.device.type == "cuda":
-            res = faiss.StandardGpuResources()
-            self.index = faiss.index_cpu_to_gpu(res, 0, index)
-            logger.info("FAISS index on GPU")
+            if self.num_gpus > 1:
+                logger.info(f"Sharding FAISS index across {self.num_gpus} GPUs")
+                co = faiss.GpuMultipleClonerOptions()
+                co.shard = True
+                co.useFloat16 = True
+                self.index = faiss.index_cpu_to_all_gpus(index, co=co)
+                logger.info(
+                    f"FAISS index sharded across {self.num_gpus} GPUs with FP16"
+                )
+            else:
+                res = faiss.StandardGpuResources()
+                self.index = faiss.index_cpu_to_gpu(res, 0, index)
+                logger.info("FAISS index on GPU 0")
         else:
             self.index = index
 
-    def search(self, query, k):
+    def search(self, queries, k):
+        is_single = isinstance(queries, str)
+        if is_single:
+            queries = [queries]
+
         with torch.no_grad():
-            query_embed = self.encoder.encode([query], self.device).cpu().numpy()
-            query_embed = query_embed / np.linalg.norm(
-                query_embed, axis=1, keepdims=True
+            encoder = self.encoder.module if self._is_parallel else self.encoder
+            query_embeds = encoder.encode(queries, self.device).cpu().numpy()
+            query_embeds = query_embeds / np.linalg.norm(
+                query_embeds, axis=1, keepdims=True
             )
-            distances, indices = self.index.search(query_embed, k)
-            return indices[0].tolist()
+            distances, indices = self.index.search(query_embeds, k)
+
+        results = [idx.tolist() for idx in indices]
+        return results[0] if is_single else results
 
 
 class GRAFTRetriever(ZeroShotRetriever):
     """GRAFT retriever: trained encoder + FAISS index."""
 
-    def _load_encoder(self, encoder_path):
-        logger.info(f"Loading GRAFT encoder from {encoder_path}")
-        self.encoder = load_trained_encoder(encoder_path, self.config, self.device)
+    def _load_encoder(self, model_name):
+        logger.info(f"Loading GRAFT encoder from {model_name}")
+        encoder = load_trained_encoder(model_name, self.config, self.device)
+
+        if self.num_gpus > 1:
+            logger.info(f"Using {self.num_gpus} GPUs with DataParallel for encoder")
+            self.encoder = torch.nn.DataParallel(encoder)
+            self._is_parallel = True
+        else:
+            self.encoder = encoder
+            self._is_parallel = False
 
 
 class BM25Retriever(BaseRetriever):
@@ -84,7 +118,15 @@ class BM25Retriever(BaseRetriever):
         ]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
-    def search(self, query, k):
-        tokenized_query = query.lower().split()
-        scores = self.bm25.get_scores(tokenized_query)
-        return scores.argsort()[-k:][::-1].tolist()
+    def search(self, queries, k):
+        is_single = isinstance(queries, str)
+        if is_single:
+            queries = [queries]
+
+        results = []
+        for query in queries:
+            tokenized_query = query.lower().split()
+            scores = self.bm25.get_scores(tokenized_query)
+            results.append(scores.argsort()[-k:][::-1].tolist())
+
+        return results[0] if is_single else results

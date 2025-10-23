@@ -89,10 +89,26 @@ def main():
 
     logger.info(f"Evaluating {method_name}...")
 
-    def retrieval_fn(query_text, k):
-        return retriever.search(query_text, k)
+    num_gpus = torch.cuda.device_count()
+    eval_batch_size = config["data"].get("eval_batch_size", 32)
 
-    evaluate_retrieval(queries, retrieval_fn, topk, method_name, args.output)
+    if num_gpus > 1 and args.method != "bm25":
+        eval_batch_size = eval_batch_size * num_gpus
+        logger.info(
+            f"Multi-GPU evaluation: {num_gpus} GPUs, batch_size={eval_batch_size}"
+        )
+    else:
+        logger.info(f"Single device evaluation, batch_size={eval_batch_size}")
+        eval_batch_size = 1 if args.method == "bm25" else eval_batch_size
+
+    evaluate_retrieval(
+        queries,
+        retriever.search,
+        topk,
+        method_name,
+        args.output,
+        batch_size=eval_batch_size,
+    )
 
 
 if __name__ == "__main__":
