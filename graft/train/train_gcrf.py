@@ -108,11 +108,11 @@ def train(config_path):
 
             query_embeds = encoder(query_encoded["input_ids"], query_encoded["attention_mask"])
 
-            all_node_ids = torch.cat([pos_nodes, neg_nodes])
-            node_texts = [graph.node_text[int(nid)] for nid in all_node_ids.cpu().numpy()]
+            subgraph_node_ids = subgraph.n_id
+            subgraph_texts = [graph.node_text[int(nid)] for nid in subgraph_node_ids.cpu().numpy()]
 
             node_encoded = encoder.tokenizer(
-                node_texts,
+                subgraph_texts,
                 max_length=cfg["encoder"]["max_len"],
                 padding=True,
                 truncation=True,
@@ -123,7 +123,12 @@ def train(config_path):
 
             node_embeds_gnn = gnn(node_embeds_raw, subgraph.edge_index.to(device))
 
-            labels = torch.arange(len(pos_nodes), device=device)
+            pos_indices_in_subgraph = torch.tensor(
+                [torch.where(subgraph_node_ids == pid)[0][0].item() for pid in pos_nodes],
+                device=device
+            )
+
+            labels = pos_indices_in_subgraph
 
             loss, loss_q2d, loss_nbr = compute_total_loss(
                 query_embeds=query_embeds,
