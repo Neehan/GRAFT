@@ -18,19 +18,9 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
-# 1. BM25 baseline (no FAISS needed)
-echo "=== 1/2: Running BM25 ==="
-python -m graft.eval.evaluate \
-    --method bm25 \
-    --config "$CONFIG_PATH" \
-    --output "$OUTPUT_DIR/bm25_results.json" \
-    --split "$SPLIT"
-echo ""
+# 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
+echo "=== 1/2: Running Zero-shot E5 ==="
 
-# 2. Zero-shot E5 (same encoder as GRAFT, but untrained)
-echo "=== 2/2: Running Zero-shot E5 ==="
-
-# First, embed corpus with zero-shot encoder
 ZERO_SHOT_EMBEDDINGS="$OUTPUT_DIR/zero_shot_embeddings.npy"
 ZERO_SHOT_INDEX="$OUTPUT_DIR/zero_shot_index.faiss"
 
@@ -53,6 +43,15 @@ python -m graft.eval.evaluate \
     --faiss-index "$ZERO_SHOT_INDEX" \
     --config "$CONFIG_PATH" \
     --output "$OUTPUT_DIR/zero_shot_e5_results.json" \
+    --split "$SPLIT"
+echo ""
+
+# 2. BM25 baseline (sparse retrieval, no FAISS needed)
+echo "=== 2/2: Running BM25 ==="
+python -m graft.eval.evaluate \
+    --method bm25 \
+    --config "$CONFIG_PATH" \
+    --output "$OUTPUT_DIR/bm25_results.json" \
     --split "$SPLIT"
 echo ""
 

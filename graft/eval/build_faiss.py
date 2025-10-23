@@ -44,3 +44,24 @@ def build_faiss_index(embeddings_path, config, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     faiss.write_index(index, output_path)
     logger.info(f"FAISS index saved: {output_path}")
+
+
+if __name__ == "__main__":
+    import argparse
+    import yaml
+
+    parser = argparse.ArgumentParser(description="Build FAISS index from embeddings")
+    parser.add_argument("embeddings", type=str, help="Path to embeddings .npy file")
+    parser.add_argument("config", type=str, help="Path to config YAML")
+    parser.add_argument("output", type=str, help="Path to save FAISS index")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    build_faiss_index(args.embeddings, config, args.output)

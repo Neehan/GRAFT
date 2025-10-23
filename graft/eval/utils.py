@@ -6,7 +6,9 @@ from datasets import load_dataset
 
 from graft.eval.metrics import (
     compute_recall_at_k,
+    compute_joint_recall_at_k,
     compute_mrr,
+    compute_ndcg_at_k,
     aggregate_and_save_results,
 )
 
@@ -70,10 +72,11 @@ def evaluate_retrieval(
         Results dict with metrics
     """
     all_scores = {
+        "joint_recall@10": [],
         "recall@5": [],
         "recall@10": [],
-        "recall@50": [],
-        "mrr": [],
+        "ndcg@10": [],
+        "mrr@10": [],
     }
 
     for i in tqdm(range(0, len(queries), batch_size), desc=f"Evaluating {method_name}"):
@@ -84,9 +87,12 @@ def evaluate_retrieval(
 
         for q, retrieved in zip(batch_queries, retrieved_batch):
             gold_ids = q["gold_ids"]
+            all_scores["joint_recall@10"].append(
+                compute_joint_recall_at_k(retrieved, gold_ids, 10)
+            )
             all_scores["recall@5"].append(compute_recall_at_k(retrieved, gold_ids, 5))
             all_scores["recall@10"].append(compute_recall_at_k(retrieved, gold_ids, 10))
-            all_scores["recall@50"].append(compute_recall_at_k(retrieved, gold_ids, 50))
-            all_scores["mrr"].append(compute_mrr(retrieved, gold_ids))
+            all_scores["ndcg@10"].append(compute_ndcg_at_k(retrieved, gold_ids, 10))
+            all_scores["mrr@10"].append(compute_mrr(retrieved, gold_ids, 10))
 
     return aggregate_and_save_results(all_scores, output_path, method_name)

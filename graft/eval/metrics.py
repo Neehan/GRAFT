@@ -1,4 +1,4 @@
-"""Shared metrics for retrieval evaluation: Recall@K, MRR."""
+"""Shared metrics for multi-hop retrieval evaluation: Joint-Recall, Recall@K, nDCG, MRR."""
 
 import json
 import logging
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def compute_recall_at_k(retrieved, gold, k):
-    """Compute Recall@K for a single query.
+    """Compute Recall@K (any) for a single query.
 
     Args:
         retrieved: List of retrieved document IDs (ranked)
@@ -24,20 +24,63 @@ def compute_recall_at_k(retrieved, gold, k):
     return len(retrieved_k & gold_set) / len(gold_set) if gold_set else 0.0
 
 
-def compute_mrr(retrieved, gold):
-    """Compute Mean Reciprocal Rank for a single query.
+def compute_joint_recall_at_k(retrieved, gold, k):
+    """Compute Joint-Recall@K for a single query (multi-hop retrieval).
 
     Args:
         retrieved: List of retrieved document IDs (ranked)
         gold: List/set of gold document IDs
+        k: Cutoff for top-k
 
     Returns:
-        MRR score (1/rank of first gold doc, 0 if none found)
+        1.0 if ALL gold docs are in top-k, 0.0 otherwise
     """
-    for i, doc_id in enumerate(retrieved):
+    retrieved_k = set(retrieved[:k])
+    gold_set = set(gold)
+    return 1.0 if gold_set.issubset(retrieved_k) else 0.0
+
+
+def compute_mrr(retrieved, gold, k):
+    """Compute Mean Reciprocal Rank@K for a single query.
+
+    Args:
+        retrieved: List of retrieved document IDs (ranked)
+        gold: List/set of gold document IDs
+        k: Cutoff for top-k
+
+    Returns:
+        MRR@K score (1/rank of first gold doc in top-k, 0 if none found)
+    """
+    for i, doc_id in enumerate(retrieved[:k]):
         if doc_id in gold:
             return 1.0 / (i + 1)
     return 0.0
+
+
+def compute_ndcg_at_k(retrieved, gold, k):
+    """Compute nDCG@K for a single query.
+
+    Args:
+        retrieved: List of retrieved document IDs (ranked)
+        gold: List/set of gold document IDs
+        k: Cutoff for top-k
+
+    Returns:
+        nDCG@K score
+    """
+    retrieved_k = retrieved[:k]
+    gold_set = set(gold)
+
+    dcg = sum(
+        1.0 / np.log2(i + 2)
+        for i, doc_id in enumerate(retrieved_k)
+        if doc_id in gold_set
+    )
+
+    ideal_k = min(len(gold_set), k)
+    idcg = sum(1.0 / np.log2(i + 2) for i in range(ideal_k))
+
+    return dcg / idcg if idcg > 0 else 0.0
 
 
 def aggregate_and_save_results(all_scores, output_path, method_name):

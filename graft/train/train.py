@@ -213,7 +213,7 @@ class GRAFTTrainer:
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
 
     def _evaluate(self):
-        """Evaluate on fixed eval set."""
+        """Fast training evaluation: 1 pos + random negatives (proxy for overfitting detection)."""
         self.encoder.eval()
 
         correct = 0

@@ -88,3 +88,26 @@ def embed_corpus(encoder_path, config, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_embeddings)
     logger.info(f"Saved embeddings: {all_embeddings.shape}")
+
+
+if __name__ == "__main__":
+    import argparse
+    import yaml
+
+    parser = argparse.ArgumentParser(description="Embed corpus with encoder")
+    parser.add_argument(
+        "encoder_path", type=str, help="Path to checkpoint or HF model name"
+    )
+    parser.add_argument("config", type=str, help="Path to config YAML")
+    parser.add_argument("output", type=str, help="Path to save embeddings .npy")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    embed_corpus(args.encoder_path, config, args.output)
