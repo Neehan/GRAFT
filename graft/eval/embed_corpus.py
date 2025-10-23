@@ -30,6 +30,11 @@ def embed_corpus(encoder_path, config, output_path):
         logger.info(f"Loading zero-shot model: {encoder_path}")
         encoder = load_zero_shot_encoder(encoder_path, config, device)
 
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        encoder = torch.nn.DataParallel(encoder)
+
     graph_dir = Path(config["data"]["graph_dir"])
     graph_name = config["data"]["graph_name"]
     semantic_k = config["data"].get("semantic_k")
@@ -46,14 +51,40 @@ def embed_corpus(encoder_path, config, output_path):
     corpus_texts = graph.node_text
 
     embeddings = []
-    batch_size = config["encoder"].get("batch_size", 128)
 
-    for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
-        batch = corpus_texts[i : i + batch_size]
-        batch_embeds = encoder.encode(batch, device)
-        embeddings.append(batch_embeds.cpu().numpy())
+    # Scale batch size by number of GPUs
+    base_batch_size = config["data"]["batch_size"]
+    batch_size = base_batch_size * max(1, torch.cuda.device_count())
+    logger.info(
+        f"Batch size: {batch_size} (base={base_batch_size}, GPUs={torch.cuda.device_count()})"
+    )
 
-    all_embeddings = np.vstack(embeddings)
+    # Enable mixed precision for faster inference
+    use_amp = config["train"]["bf16"]
+    if use_amp:
+        logger.info("Using mixed precision (bfloat16)")
+
+    with torch.no_grad():
+        for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
+            batch = corpus_texts[i : i + batch_size]
+
+            if use_amp:
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                    if hasattr(encoder, "module"):
+                        batch_embeds = encoder.module.encode(batch, device)
+                    else:
+                        batch_embeds = encoder.encode(batch, device)
+            else:
+                if hasattr(encoder, "module"):
+                    batch_embeds = encoder.module.encode(batch, device)
+                else:
+                    batch_embeds = encoder.encode(batch, device)
+
+            # Keep on GPU
+            embeddings.append(batch_embeds)
+
+    # Single CPU transfer at the end
+    all_embeddings = torch.cat(embeddings, dim=0).cpu().numpy()
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_embeddings)

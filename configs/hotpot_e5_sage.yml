@@ -8,6 +8,7 @@ data:
   graph_name: page_graph
   chunk_size: 220
   chunk_overlap: 40
+  batch_size: 2048 # Batch size for inference/embedding per GPU (2x L40S = 4096 total)
   semantic_k: 5 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
   knn_only: false # If true, use only semantic edges (ablation)
 

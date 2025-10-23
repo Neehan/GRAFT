@@ -34,20 +34,97 @@ def embed_graph_nodes(graph, config, device=None):
         pool=config["encoder"]["pool"],
         freeze_layers=0,
     )
+
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        encoder = torch.nn.DataParallel(encoder)
+
     encoder.to(device)
     encoder.eval()
 
     node_texts = graph.node_text
     embeddings = []
-    batch_size = config["encoder"].get("batch_size", 128)
+
+    # Scale batch size by number of GPUs
+    base_batch_size = config["data"]["batch_size"]
+    batch_size = base_batch_size * max(1, torch.cuda.device_count())
+    logger.info(
+        f"Batch size: {batch_size} (base={base_batch_size}, GPUs={torch.cuda.device_count()})"
+    )
+
+    # Enable mixed precision for faster inference
+    use_amp = config["train"]["bf16"]
+    if use_amp:
+        logger.info("Using mixed precision (bfloat16)")
 
     logger.info(f"Embedding {len(node_texts)} nodes...")
-    for i in tqdm(range(0, len(node_texts), batch_size), desc="Embedding"):
-        batch = node_texts[i : i + batch_size]
-        batch_embeds = encoder.encode(batch, device)
-        embeddings.append(batch_embeds.cpu().numpy())
 
-    return np.vstack(embeddings)
+    # Pre-allocate for efficiency
+    num_nodes = len(node_texts)
+    with torch.no_grad():
+        for i in tqdm(range(0, num_nodes, batch_size), desc="Embedding"):
+            batch = node_texts[i : i + batch_size]
+
+            # Use autocast for mixed precision
+            if use_amp:
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                    batch_embeds = _encode_batch(encoder, batch, config, device)
+            else:
+                batch_embeds = _encode_batch(encoder, batch, config, device)
+
+            # Keep on GPU and only transfer at end
+            embeddings.append(batch_embeds)
+
+    # Single CPU transfer at the end
+    all_embeddings = torch.cat(embeddings, dim=0)
+    return all_embeddings.cpu().numpy()
+
+
+def _encode_batch(encoder, texts, config, device):
+    """Helper to encode a batch of texts.
+
+    Handles both DataParallel and single-GPU cases.
+    """
+    # Access tokenizer from encoder or encoder.module
+    if hasattr(encoder, "module"):
+        tokenizer = encoder.module.tokenizer
+        max_len = encoder.module.max_len
+        pool = encoder.module.pool
+    else:
+        tokenizer = encoder.tokenizer
+        max_len = encoder.max_len
+        pool = encoder.pool
+
+    encoded = tokenizer(
+        texts,
+        max_length=max_len,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+    )
+    input_ids = encoded["input_ids"].to(device)
+    attention_mask = encoded["attention_mask"].to(device)
+
+    # Forward pass
+    if hasattr(encoder, "module"):
+        outputs = encoder.module.model(
+            input_ids=input_ids, attention_mask=attention_mask
+        )
+    else:
+        outputs = encoder.model(input_ids=input_ids, attention_mask=attention_mask)
+
+    # Pooling
+    if pool == "cls":
+        embeddings = outputs.last_hidden_state[:, 0]
+    elif pool == "mean":
+        embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
+            1
+        ) / attention_mask.sum(-1, keepdim=True)
+    else:
+        raise ValueError(f"Unknown pooling method: {pool}")
+
+    return embeddings
 
 
 def build_knn_edges(embeddings, k):
