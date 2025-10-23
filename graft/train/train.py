@@ -184,7 +184,7 @@ class GRAFTTrainer:
 
         if verbose:
             logger.info(
-                f"Batch: {len(queries)} queries, subgraph: {subgraph.num_nodes} nodes, {subgraph.num_edges} edges"
+                f"Batch: {len(queries)} queries, subgraph: {subgraph.n_id.size(0)} nodes, {subgraph.edge_index.size(1)} edges"
             )
         log_mem("start")
 
