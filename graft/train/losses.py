@@ -6,22 +6,48 @@ import torch.nn.functional as F
 
 def info_nce_loss(query_embeds, doc_embeds, labels, tau):
     """
+    Soft-OR InfoNCE: sum exp(sim) over all positives in numerator.
+
     query_embeds: (B, D)
     doc_embeds: (N, D) where N includes all nodes in subgraph
     labels: (B, K) where K is number of positives per query, or (B,) for single positive
     tau: temperature
 
-    If labels is 2D, averages loss over all positives per query.
+    For multiple positives, uses soft-OR: any positive being similar makes numerator large.
+    As tau->0, behaves like max over positives (not average).
     """
     scores = torch.matmul(query_embeds, doc_embeds.T) / tau
 
     if labels.dim() == 1:
+        # Single positive per query: standard InfoNCE
         return F.cross_entropy(scores, labels)
 
-    total_loss = 0.0
-    for i in range(labels.size(1)):
-        total_loss += F.cross_entropy(scores, labels[:, i])
-    return total_loss / labels.size(1)
+    # Soft-OR InfoNCE for multiple positives (vectorized, numerically stable)
+    # Use log-sum-exp trick to avoid overflow/underflow
+    # log(sum(exp(x))) = logsumexp(x)
+
+    # Create mask for positives: (B, N)
+    batch_size, num_candidates = scores.size()
+    pos_mask = torch.zeros_like(scores, dtype=torch.bool)
+
+    # Set mask[i, labels[i, :]] = True for each query
+    batch_indices = torch.arange(batch_size, device=scores.device).unsqueeze(1)
+    pos_mask[batch_indices, labels] = True
+
+    # Numerator: log(sum(exp(scores))) for positives only
+    # Set non-positive scores to -inf so they don't contribute
+    pos_scores = torch.where(
+        pos_mask, scores, torch.tensor(-1e10, device=scores.device)
+    )
+    log_numerator = torch.logsumexp(pos_scores, dim=1)  # (B,)
+
+    # Denominator: log(sum(exp(scores))) for all candidates
+    log_denominator = torch.logsumexp(scores, dim=1)  # (B,)
+
+    # -log(numerator / denominator) = -(log_numerator - log_denominator)
+    loss = -(log_numerator - log_denominator).mean()
+
+    return loss
 
 
 def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):

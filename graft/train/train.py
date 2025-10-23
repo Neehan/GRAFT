@@ -233,24 +233,30 @@ class GRAFTTrainer:
             node_embeds, batch["subgraph"].edge_index.to(self.device)
         )
 
-        # Labels: Sample 1 positive per query to avoid averaging (which pulls query to centroid)
+        # Labels: Use all positives with soft-OR InfoNCE (sum in numerator, not average)
         # batch["pos_nodes"] is a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
         subgraph_ids = batch["subgraph"].n_id.to(self.device)
 
-        labels = []
+        labels_list = []
+        max_positives = max(len(pos_nodes) for pos_nodes in batch["pos_nodes"])
+
         for pos_nodes in batch["pos_nodes"]:
             pos_tensor = torch.tensor(pos_nodes, device=self.device, dtype=torch.long)
             matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(dim=0)
             pos_indices = matches.nonzero(as_tuple=False).squeeze(-1)
 
-            # Randomly sample 1 positive (different each step for data augmentation)
-            if len(pos_indices) > 0:
-                random_idx = torch.randint(0, len(pos_indices), (1,)).item()
-                labels.append(pos_indices[random_idx])
-            else:
-                raise ValueError("No positives found for query")
+            if len(pos_indices) == 0:
+                raise ValueError("No positives found for query in subgraph")
 
-        labels = torch.stack(labels)
+            # Pad to max_positives by repeating (for batching) - do in one operation
+            if len(pos_indices) < max_positives:
+                # Calculate how many times to repeat, then slice
+                repeats = (max_positives + len(pos_indices) - 1) // len(pos_indices)
+                pos_indices = pos_indices.repeat(repeats)[:max_positives]
+
+            labels_list.append(pos_indices)
+
+        labels = torch.stack(labels_list, dim=0)  # (B, K)
 
         # Loss
         loss, loss_q2d, loss_nbr = compute_total_loss(
