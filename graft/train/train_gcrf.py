@@ -1,6 +1,7 @@
 """Main training loop for GRAFT with Accelerate, wandb, and hard-negative mining."""
 
 import logging
+import warnings
 import yaml
 import torch
 import wandb
@@ -9,6 +10,9 @@ from tqdm import tqdm
 from accelerate import Accelerator
 from transformers import get_cosine_schedule_with_warmup
 from datasets import load_dataset
+
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+warnings.filterwarnings("ignore", message=".*Pydantic.*")
 
 from graft.models.encoder import Encoder
 from graft.models.gnn import GraphSAGE
@@ -170,6 +174,7 @@ def train(config_path):
                     "lr_gnn": scheduler.get_last_lr()[1],
                 }
                 wandb.log(metrics)
+                logger.info(f"Step {global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}")
 
             pbar.set_postfix({"loss": f"{loss.item():.4f}", "step": global_step})
 
