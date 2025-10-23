@@ -46,7 +46,7 @@ class GraphBatchSampler:
             subset, edge_index, mapping, edge_mask = k_hop_subgraph(
                 pos_nodes.clone(),
                 self.num_hops,
-                self.graph.edge_index,
+                self.graph.edge_index.clone(),
                 relabel_nodes=True,
             )
 
