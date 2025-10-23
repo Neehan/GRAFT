@@ -5,9 +5,19 @@ Fine-tune dual-encoder retrievers using graph message passing over document/enti
 
 ## Setup
 
+**Option 1: Local (with conda)**
 ```bash
 conda env create -f environment.yml
 conda activate graft
+pip install -e .
+```
+
+**Option 2: SLURM (pip only)**
+```bash
+module load python/3.10  # or your cluster's Python module
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install faiss-gpu
+pip install -e .
 ```
 
 ## Quickstart
