@@ -5,14 +5,19 @@ from torch_geometric.utils import k_hop_subgraph
 
 
 class GraphBatchSampler:
-    def __init__(self, graph, train_pairs, query_batch_size, fanouts):
+    def __init__(
+        self, graph, train_pairs, query_batch_size, fanouts, rank=0, world_size=1
+    ):
         self.graph = graph
         self.train_pairs = train_pairs
         self.batch_size = query_batch_size
         self.num_hops = len(fanouts)
+        self.rank = rank
+        self.world_size = world_size
 
     def __len__(self):
-        return len(self.train_pairs) // self.batch_size
+        total_batches = len(self.train_pairs) // self.batch_size
+        return total_batches // self.world_size
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
@@ -28,7 +33,11 @@ class GraphBatchSampler:
         return torch.tensor(neg_edges, dtype=torch.long).t()
 
     def __iter__(self):
-        for i in range(0, len(self.train_pairs), self.batch_size):
+        for batch_idx in range(0, len(self.train_pairs) // self.batch_size):
+            if batch_idx % self.world_size != self.rank:
+                continue
+
+            i = batch_idx * self.batch_size
             batch_pairs = self.train_pairs[i : i + self.batch_size]
 
             queries = [pair["query"] for pair in batch_pairs]

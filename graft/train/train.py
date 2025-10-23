@@ -106,9 +106,16 @@ class GRAFTTrainer:
                 train_pairs=train_pairs,
                 query_batch_size=self.cfg["train"]["query_batch_size"],
                 fanouts=self.cfg["gnn"]["fanouts"],
+                rank=self.accelerator.process_index,
+                world_size=self.accelerator.num_processes,
             )
 
         if self.accelerator.is_main_process:
+            logger.info(
+                f"Distributed sampler: {self.accelerator.num_processes} processes, "
+                f"{len(self.sampler)} batches per process, "
+                f"{len(self.sampler) * self.accelerator.num_processes} total batches"
+            )
             logger.info("Building fixed eval set with sampled negatives...")
         self.eval_data = self._build_fixed_eval_set(dev_pairs)
 
@@ -238,6 +245,8 @@ class GRAFTTrainer:
         """Fast training evaluation: 1 pos + random negatives (proxy for overfitting detection)."""
         self.encoder.eval()
 
+        unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
+
         correct = 0
         total = len(self.eval_data)
         recall_k = self.cfg["eval"]["recall_k"]
@@ -254,14 +263,14 @@ class GRAFTTrainer:
                 batch_size = len(batch_items)
 
                 queries = [item["query"] for item in batch_items]
-                query_embeds = self.encoder.encode(queries, self.device)
+                query_embeds = unwrapped_encoder.encode(queries, self.device)
 
                 all_candidates = []
                 num_candidates_per_query = len(batch_items[0]["candidate_texts"])
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
 
-                candidate_embeds = self.encoder.encode(all_candidates, self.device)
+                candidate_embeds = unwrapped_encoder.encode(all_candidates, self.device)
                 candidate_embeds = candidate_embeds.reshape(
                     batch_size, num_candidates_per_query, -1
                 )
