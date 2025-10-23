@@ -7,12 +7,21 @@ import torch.nn.functional as F
 def info_nce_loss(query_embeds, doc_embeds, labels, tau):
     """
     query_embeds: (B, D)
-    doc_embeds: (N, D) where N = B * (1 + num_negatives)
-    labels: (B,) indices of positives in doc_embeds
+    doc_embeds: (N, D) where N includes all nodes in subgraph
+    labels: (B, K) where K is number of positives per query, or (B,) for single positive
     tau: temperature
+
+    If labels is 2D, averages loss over all positives per query.
     """
     scores = torch.matmul(query_embeds, doc_embeds.T) / tau
-    return F.cross_entropy(scores, labels)
+
+    if labels.dim() == 1:
+        return F.cross_entropy(scores, labels)
+
+    total_loss = 0.0
+    for i in range(labels.size(1)):
+        total_loss += F.cross_entropy(scores, labels[:, i])
+    return total_loss / labels.size(1)
 
 
 def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):

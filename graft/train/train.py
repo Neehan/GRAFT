@@ -179,10 +179,10 @@ class GRAFTTrainer:
         eval_set = []
         for i in range(num_samples):
             pair = dev_pairs[i]
-            pos_node = pair["pos_node"]
+            pos_nodes = pair["pos_nodes"]
 
             neg_indices = torch.randint(0, num_nodes, (num_negatives,))
-            candidate_indices = torch.cat([torch.tensor([pos_node]), neg_indices])
+            candidate_indices = torch.cat([torch.tensor(pos_nodes), neg_indices])
             candidate_texts = [
                 self.graph.node_text[int(idx)] for idx in candidate_indices
             ]
@@ -191,6 +191,7 @@ class GRAFTTrainer:
                 {
                     "query": pair["query"],
                     "candidate_texts": candidate_texts,
+                    "num_positives": len(pos_nodes),
                 }
             )
 
@@ -220,11 +221,25 @@ class GRAFTTrainer:
             node_embeds, batch["subgraph"].edge_index.to(self.device)
         )
 
-        # Labels
-        labels = (
-            batch["subgraph"].n_id.unsqueeze(1).to(self.device)
-            == batch["pos_nodes"].unsqueeze(0).to(self.device)
-        ).nonzero()[:, 0]
+        # Labels: Find indices of all positive nodes in subgraph for each query
+        # batch["pos_nodes"] is now a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
+        subgraph_ids = batch["subgraph"].n_id.to(self.device)
+
+        labels_list = []
+        max_positives = max(len(pos_nodes) for pos_nodes in batch["pos_nodes"])
+
+        for pos_nodes in batch["pos_nodes"]:
+            pos_tensor = torch.tensor(pos_nodes, device=self.device, dtype=torch.long)
+            matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(dim=0)
+            pos_indices = matches.nonzero(as_tuple=False).squeeze(-1)
+
+            while len(pos_indices) < max_positives:
+                pos_indices = torch.cat([pos_indices, pos_indices[:1]])
+            pos_indices = pos_indices[:max_positives]
+
+            labels_list.append(pos_indices)
+
+        labels = torch.stack(labels_list, dim=0)
 
         # Loss
         loss, loss_q2d, loss_nbr = compute_total_loss(
@@ -301,7 +316,12 @@ class GRAFTTrainer:
                     scores, k=min(recall_k, scores.size(1)), dim=1
                 ).indices
 
-                correct += (top_k_indices == 0).any(dim=1).sum().item()
+                for j, item in enumerate(batch_items):
+                    num_pos = item["num_positives"]
+                    pos_indices = set(range(num_pos))
+                    retrieved_indices = set(top_k_indices[j].cpu().tolist())
+                    if pos_indices & retrieved_indices:
+                        correct += 1
 
         return correct / total
 

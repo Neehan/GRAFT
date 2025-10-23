@@ -60,17 +60,21 @@ def build_hotpot_graph(
 
     for doc_ids in query_to_docs.values():
         doc_ids = list(doc_ids)
-        if len(doc_ids) < 2:
-            continue
 
-        for i in range(len(doc_ids)):
-            for j in range(i + 1, len(doc_ids)):
-                doc_id1, doc_id2 = doc_ids[i], doc_ids[j]
-                if doc_id1 in doc_id_to_node_ids and doc_id2 in doc_id_to_node_ids:
-                    for node1 in doc_id_to_node_ids[doc_id1]:
-                        for node2 in doc_id_to_node_ids[doc_id2]:
-                            edge_list.append((node1, node2))
-                            edge_list.append((node2, node1))
+        if len(doc_ids) > 1:
+            for i in range(len(doc_ids)):
+                for j in range(i + 1, len(doc_ids)):
+                    doc_id1, doc_id2 = doc_ids[i], doc_ids[j]
+                    if doc_id1 in doc_id_to_node_ids and doc_id2 in doc_id_to_node_ids:
+                        for node1 in doc_id_to_node_ids[doc_id1]:
+                            for node2 in doc_id_to_node_ids[doc_id2]:
+                                edge_list.append((node1, node2))
+                                edge_list.append((node2, node1))
+        else:
+            doc_id = doc_ids[0]
+            if doc_id in doc_id_to_node_ids:
+                for node in doc_id_to_node_ids[doc_id]:
+                    edge_list.append((node, node))
 
     if edge_list:
         edge_index = torch.tensor(list(set(edge_list)), dtype=torch.long).T

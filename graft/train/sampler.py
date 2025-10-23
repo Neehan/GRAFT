@@ -41,10 +41,15 @@ class GraphBatchSampler:
             batch_pairs = self.train_pairs[i : i + self.batch_size]
 
             queries = [pair["query"] for pair in batch_pairs]
-            pos_nodes = torch.tensor([pair["pos_node"] for pair in batch_pairs])
+            pos_nodes_list = [pair["pos_nodes"] for pair in batch_pairs]
+
+            all_pos_nodes = []
+            for nodes in pos_nodes_list:
+                all_pos_nodes.extend(nodes)
+            all_pos_nodes_tensor = torch.tensor(all_pos_nodes, dtype=torch.long)
 
             subset, edge_index, mapping, edge_mask = k_hop_subgraph(
-                pos_nodes,
+                all_pos_nodes_tensor,
                 self.num_hops,
                 self.graph.edge_index,
                 relabel_nodes=True,
@@ -72,7 +77,7 @@ class GraphBatchSampler:
 
             yield {
                 "queries": queries,
-                "pos_nodes": pos_nodes,
+                "pos_nodes": pos_nodes_list,
                 "subgraph": subgraph,
                 "pos_edges": pos_edges,
                 "neg_edges": neg_edges,
