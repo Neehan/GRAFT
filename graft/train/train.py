@@ -11,9 +11,10 @@ from accelerate import Accelerator
 from transformers import get_cosine_schedule_with_warmup
 from datasets import load_dataset
 
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-warnings.filterwarnings("ignore", message=".*Pydantic.*")
-warnings.filterwarnings("ignore", message=".*UnsupportedFieldAttributeWarning.*")
+warnings.filterwarnings("ignore")
+import os
+
+os.environ["PYTHONWARNINGS"] = "ignore"
 
 from graft.models.encoder import Encoder
 from graft.models.gnn import GraphSAGE
@@ -270,9 +271,8 @@ class GRAFTTrainer:
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
 
-                # Sub-batch candidates to avoid OOM
-                # Use query_batch_size * num_candidates as a guide for max batch
-                candidate_batch_size = query_batch_size * num_candidates_per_query
+                # Sub-batch candidates to avoid OOM - use encoder batch size
+                candidate_batch_size = self.cfg["encoder"]["batch_size"]
                 candidate_embeds_list = []
                 for i in range(0, len(all_candidates), candidate_batch_size):
                     batch = all_candidates[i : i + candidate_batch_size]
@@ -380,7 +380,6 @@ class GRAFTTrainer:
                         == 0
                     ):
                         if self.accelerator.is_main_process:
-                            torch.cuda.empty_cache()
                             logger.info(
                                 f"Running evaluation at step {self.global_step}..."
                             )
