@@ -19,7 +19,7 @@ encoder:
   max_len: 256
   pool: cls
   freeze_layers: 0
-  batch_size: 128
+  batch_size: 192
 
 gnn:
   type: graphsage
@@ -36,7 +36,8 @@ loss:
 
 train:
   batch_size_queries: 32
-  epochs: 2
+  gradient_accumulation_steps: 4
+  epochs: 1
   lr_encoder: 2.0e-5
   lr_gnn: 1.0e-3
   weight_decay: 0.01

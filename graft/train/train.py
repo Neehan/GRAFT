@@ -31,7 +31,10 @@ class GRAFTTrainer:
             self.cfg = yaml.safe_load(f)
 
         self.accelerator = Accelerator(
-            mixed_precision="bf16" if self.cfg["train"]["bf16"] else "no"
+            mixed_precision="bf16" if self.cfg["train"]["bf16"] else "no",
+            gradient_accumulation_steps=self.cfg["train"][
+                "gradient_accumulation_steps"
+            ],
         )
         self.device = self.accelerator.device
 
@@ -168,43 +171,21 @@ class GRAFTTrainer:
 
     def _training_step(self, batch):
         """Single training step."""
-        verbose = self.global_step < 5  # Only log first 5 steps
-
-        def log_mem(stage):
-            if verbose and torch.cuda.is_available():
-                allocated = torch.cuda.memory_allocated(0) / 1e9
-                reserved = torch.cuda.memory_reserved(0) / 1e9
-                logger.info(
-                    f"[{stage}] GPU 0: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-                )
-
         queries = batch["queries"]
         pos_nodes = batch["pos_nodes"]
         subgraph = batch["subgraph"]
 
-        if verbose:
-            logger.info(
-                f"Batch: {len(queries)} queries, subgraph: {subgraph.n_id.size(0)} nodes, {subgraph.edge_index.size(1)} edges"
-            )
-        log_mem("start")
-
         query_encoded = self._tokenize(queries)
-        log_mem("after tokenize queries")
-
         query_embeds = self.encoder(
             query_encoded["input_ids"], query_encoded["attention_mask"]
         )
-        log_mem("after encode queries")
 
         subgraph_node_ids = subgraph.n_id
         subgraph_texts = [
             self.graph.node_text[int(nid)] for nid in subgraph.n_id_cpu.numpy()
         ]
-        if verbose:
-            logger.info(f"Encoding {len(subgraph_texts)} subgraph nodes")
 
         node_encoded = self._tokenize(subgraph_texts)
-        log_mem("after tokenize nodes")
 
         # Batch encoding to avoid OOM with large subgraphs
         encoder_batch_size = self.cfg["encoder"]["batch_size"]
@@ -220,15 +201,14 @@ class GRAFTTrainer:
             node_embeds_list.append(batch_embeds)
 
         node_embeds_raw = torch.cat(node_embeds_list, dim=0)
-        log_mem("after encode nodes (RAW EMBEDS - BATCHED)")
 
         node_embeds_gnn = self.gnn(node_embeds_raw, subgraph.edge_index.to(self.device))
-        log_mem("after GNN")
 
-        pos_indices_in_subgraph = torch.tensor(
-            [torch.where(subgraph_node_ids == pid)[0][0].item() for pid in pos_nodes],
-            device=self.device,
-        )
+        # Vectorized index lookup - avoid Python loop with .item() syncs
+        pos_nodes_tensor = torch.tensor(pos_nodes, device=self.device)
+        pos_indices_in_subgraph = (
+            subgraph_node_ids.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
+        ).nonzero()[:, 0]
 
         labels = pos_indices_in_subgraph
 
@@ -245,7 +225,6 @@ class GRAFTTrainer:
             tau_graph=self.cfg["loss"]["tau_graph"],
             alpha_link=self.cfg["loss"]["alpha_link"],
         )
-        log_mem("after loss computation")
 
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
 
@@ -282,22 +261,12 @@ class GRAFTTrainer:
 
     def train(self):
         """Main training loop."""
-        # Skip zero-shot eval for debugging OOM
-        # logger.info("Running zero-shot evaluation...")
-        # zero_shot_recall = self._evaluate()
-        # logger.info(
-        #     f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
-        # )
-        # wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
-
-        logger.info("=== Memory Debug Mode ===")
-        if torch.cuda.is_available():
-            logger.info(f"GPU count: {torch.cuda.device_count()}")
-            for i in range(torch.cuda.device_count()):
-                logger.info(f"GPU {i}: {torch.cuda.get_device_properties(i).name}")
-                logger.info(
-                    f"  Total memory: {torch.cuda.get_device_properties(i).total_memory / 1e9:.2f} GB"
-                )
+        logger.info("Running zero-shot evaluation...")
+        zero_shot_recall = self._evaluate()
+        logger.info(
+            f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+        )
+        wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
         for epoch in range(self.cfg["train"]["epochs"]):
             self.encoder.train()
@@ -308,68 +277,73 @@ class GRAFTTrainer:
             )
 
             for batch in pbar:
-                step_output = self._training_step(batch)
-                loss = step_output["loss"]
-                loss_q2d = step_output["loss_q2d"]
-                loss_nbr = step_output["loss_nbr"]
+                with self.accelerator.accumulate(self.encoder, self.gnn):
+                    step_output = self._training_step(batch)
+                    loss = step_output["loss"]
+                    loss_q2d = step_output["loss_q2d"]
+                    loss_nbr = step_output["loss_nbr"]
 
-                self.accelerator.backward(loss)
+                    self.accelerator.backward(loss)
 
-                if self.global_step < 5 and torch.cuda.is_available():
-                    allocated = torch.cuda.memory_allocated(0) / 1e9
-                    reserved = torch.cuda.memory_reserved(0) / 1e9
-                    logger.info(
-                        f"[after backward] GPU 0: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-                    )
+                    if self.cfg["train"]["grad_clip"] > 0:
+                        self.accelerator.clip_grad_norm_(
+                            list(self.encoder.parameters())
+                            + list(self.gnn.parameters()),
+                            self.cfg["train"]["grad_clip"],
+                        )
 
-                if self.cfg["train"]["grad_clip"] > 0:
-                    self.accelerator.clip_grad_norm_(
-                        list(self.encoder.parameters()) + list(self.gnn.parameters()),
-                        self.cfg["train"]["grad_clip"],
-                    )
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    self.optimizer.zero_grad()
 
-                self.optimizer.step()
-                self.scheduler.step()
-                self.optimizer.zero_grad()
+                    if self.accelerator.sync_gradients:
+                        self.global_step += 1
 
-                self.global_step += 1
+                    if (
+                        self.accelerator.sync_gradients
+                        and self.global_step % self.cfg["train"]["log_every"] == 0
+                    ):
+                        metrics = {
+                            "global_step": self.global_step,
+                            "loss": loss.item(),
+                            "loss_q2d": loss_q2d.item(),
+                            "loss_nbr": loss_nbr.item(),
+                            "lr_encoder": self.scheduler.get_last_lr()[0],
+                            "lr_gnn": self.scheduler.get_last_lr()[1],
+                        }
+                        wandb.log(metrics)
+                        logger.info(
+                            f"Step {self.global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}"
+                        )
 
-                if self.global_step % self.cfg["train"]["log_every"] == 0:
-                    metrics = {
-                        "global_step": self.global_step,
-                        "loss": loss.item(),
-                        "loss_q2d": loss_q2d.item(),
-                        "loss_nbr": loss_nbr.item(),
-                        "lr_encoder": self.scheduler.get_last_lr()[0],
-                        "lr_gnn": self.scheduler.get_last_lr()[1],
-                    }
-                    wandb.log(metrics)
-                    logger.info(
-                        f"Step {self.global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}"
-                    )
+                    if self.accelerator.sync_gradients:
+                        pbar.set_postfix(
+                            {"loss": f"{loss.item():.4f}", "step": self.global_step}
+                        )
 
-                pbar.set_postfix(
-                    {"loss": f"{loss.item():.4f}", "step": self.global_step}
-                )
+                    del batch, step_output, loss, loss_q2d, loss_nbr
 
-                del batch, step_output, loss, loss_q2d, loss_nbr
-                if self.global_step % 10 == 0:
-                    torch.cuda.empty_cache()
+                    if (
+                        self.accelerator.sync_gradients
+                        and self.global_step % self.cfg["train"]["eval_every_steps"]
+                        == 0
+                    ):
+                        torch.cuda.empty_cache()
+                        logger.info(f"Running evaluation at step {self.global_step}...")
+                        recall = self._evaluate()
+                        logger.info(
+                            f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
+                        )
+                        wandb.log(
+                            {"global_step": self.global_step, "dev_recall": recall}
+                        )
 
-                if self.global_step % self.cfg["train"]["eval_every_steps"] == 0:
-                    logger.info(f"Running evaluation at step {self.global_step}...")
-                    recall = self._evaluate()
-                    logger.info(
-                        f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
-                    )
-                    wandb.log({"global_step": self.global_step, "dev_recall": recall})
+                        if recall > self.best_recall:
+                            self.best_recall = recall
+                            self._save_checkpoint("best")
 
-                    if recall > self.best_recall:
-                        self.best_recall = recall
-                        self._save_checkpoint("best")
-
-                    self.encoder.train()
-                    self.gnn.train()
+                        self.encoder.train()
+                        self.gnn.train()
 
         self._save_checkpoint("final")
         wandb.finish()
