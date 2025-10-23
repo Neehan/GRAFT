@@ -22,11 +22,11 @@ def embed_corpus(encoder_path, config, output_path):
         freeze_layers=0
     )
 
-    encoder.load_state_dict(torch.load(encoder_path, map_location=device))
+    encoder.load_state_dict(torch.load(encoder_path, map_location=device, weights_only=True))
     encoder.to(device)
     encoder.eval()
 
-    graph = torch.load(config["data"]["graph_path"])
+    graph = torch.load(config["data"]["graph_path"], weights_only=False)
     corpus_texts = graph.node_text
 
     embeddings = []

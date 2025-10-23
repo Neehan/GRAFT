@@ -49,7 +49,7 @@ def train(config_path):
     )
 
     logger.info("Loading HotpotQA datasets...")
-    graph = torch.load(cfg["data"]["graph_path"])
+    graph = torch.load(cfg["data"]["graph_path"], weights_only=False)
     train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
     dev_dataset = load_dataset("hotpot_qa", "distractor", split="validation")
 

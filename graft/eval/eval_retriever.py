@@ -46,7 +46,7 @@ def evaluate_retriever(encoder_path, index_path, config, output_path, dataset, g
         freeze_layers=0
     )
 
-    encoder.load_state_dict(torch.load(encoder_path, map_location=device))
+    encoder.load_state_dict(torch.load(encoder_path, map_location=device, weights_only=True))
     encoder.to(device)
     encoder.eval()
 

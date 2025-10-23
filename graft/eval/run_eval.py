@@ -33,7 +33,7 @@ def run_full_eval(encoder_path, config_path, output_dir, split="validation"):
 
     logger.info(f"Loading HotpotQA {split} split and graph...")
     dataset = load_dataset("hotpot_qa", "distractor", split=split)
-    graph = torch.load(config["data"]["graph_path"])
+    graph = torch.load(config["data"]["graph_path"], weights_only=False)
 
     logger.info("Step 3/3: Evaluating retriever...")
     evaluate_retriever(encoder_path, str(index_path), config, str(results_path), dataset, graph)

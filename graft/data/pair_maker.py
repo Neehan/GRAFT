@@ -14,7 +14,7 @@ def load_query_pairs(dataset, graph_path):
         dataset: Pre-loaded HuggingFace dataset
         graph_path: Path to graph .pt file
     """
-    graph = torch.load(graph_path)
+    graph = torch.load(graph_path, weights_only=False)
     title_to_id = graph.title_to_id
 
     pairs = []
@@ -44,7 +44,7 @@ def create_pos_map_from_hotpot(dataset, graph_path, output_path):
         graph_path: Path to graph .pt file
         output_path: Path to save pos_map JSON
     """
-    graph = torch.load(graph_path)
+    graph = torch.load(graph_path, weights_only=False)
     title_to_id = graph.title_to_id
 
     qid2pos = {}
