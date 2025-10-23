@@ -8,6 +8,7 @@ import wandb
 from pathlib import Path
 from tqdm import tqdm
 from accelerate import Accelerator
+from accelerate.utils import DistributedDataParallelKwargs
 from transformers import get_cosine_schedule_with_warmup
 from datasets import load_dataset
 
@@ -37,10 +38,12 @@ class GRAFTTrainer:
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.cfg["train"][
                 "gradient_accumulation_steps"
             ],
+            kwargs_handlers=[ddp_kwargs],
         )
         self.device = self.accelerator.device
 
