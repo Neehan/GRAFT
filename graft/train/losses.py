@@ -21,6 +21,9 @@ def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):
     edge_index: (2, E) COO format
     tau_graph: temperature
     """
+    if edge_index.size(1) == 0:
+        return torch.tensor(0.0, device=node_embeds.device)
+
     src, dst = edge_index
     num_edges = edge_index.size(1)
 
@@ -31,7 +34,7 @@ def neighbor_contrast_loss(node_embeds, edge_index, tau_graph):
     numerator = torch.exp(pos_scores)
     denominator = torch.exp(all_scores).sum(dim=1)
 
-    loss = -torch.log(numerator / denominator).mean()
+    loss = -torch.log(numerator / denominator + 1e-8).mean()
     return loss
 
 
