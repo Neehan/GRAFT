@@ -8,7 +8,8 @@ __pycache__/
 outputs/
 reports/
 logs/
-
+datasets/
+CLAUDE.md
 # C extensions
 *.so
 

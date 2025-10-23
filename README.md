@@ -14,9 +14,9 @@ conda activate graft
 
 GRAFT uses HuggingFace `datasets` to automatically download HotpotQA. No manual data download needed.
 
-### 1. Prepare graph
+### 1. Prepare data
 ```bash
-bash scripts/prepare_data.sh ./data/hotpot
+bash scripts/prepare_data.sh ./datasets/hotpot
 ```
 
 ### 2. Train
@@ -24,33 +24,15 @@ bash scripts/prepare_data.sh ./data/hotpot
 bash scripts/run_train.sh configs/hotpot_e5_sage.yml
 ```
 
-### 3. Embed corpus (encoder-only)
-```bash
-bash scripts/run_embed.sh \
-  outputs/graft_hotpot_e5_sage/encoder_best.pt \
-  configs/hotpot_e5_sage.yml \
-  outputs/graft_hotpot_e5_sage/embeddings.npy
-```
-
-### 4. Build FAISS index
-```bash
-python -c "
-import logging, yaml
-logging.basicConfig(level=logging.INFO)
-from graft.eval.build_faiss import build_faiss_index
-with open('configs/hotpot_e5_sage.yml') as f: config = yaml.safe_load(f)
-build_faiss_index('outputs/graft_hotpot_e5_sage/embeddings.npy', config, 'outputs/graft_hotpot_e5_sage/index.faiss')
-"
-```
-
-### 5. Evaluate
+### 3. Evaluate (embed + build index + compute metrics)
 ```bash
 bash scripts/run_eval.sh \
   outputs/graft_hotpot_e5_sage/encoder_best.pt \
-  outputs/graft_hotpot_e5_sage/index.faiss \
   configs/hotpot_e5_sage.yml \
-  outputs/graft_hotpot_e5_sage/results.json
+  outputs/graft_hotpot_e5_sage
 ```
+
+This runs the full eval pipeline: embeds corpus, builds FAISS index, computes Recall@K/MRR metrics.
 
 ## Structure
 

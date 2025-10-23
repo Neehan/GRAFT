@@ -3,14 +3,17 @@
 import json
 import logging
 import torch
-from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
 
-def load_query_pairs(split, graph_path):
-    """Load query-doc pairs from HotpotQA HF dataset."""
-    dataset = load_dataset("hotpot_qa", "distractor", split=split)
+def load_query_pairs(dataset, graph_path):
+    """Load query-doc pairs from HotpotQA HF dataset.
+
+    Args:
+        dataset: Pre-loaded HuggingFace dataset
+        graph_path: Path to graph .pt file
+    """
     graph = torch.load(graph_path)
     title_to_id = graph.title_to_id
 
@@ -29,13 +32,18 @@ def load_query_pairs(split, graph_path):
                         "qid": qid
                     })
 
-    logger.info(f"Loaded {len(pairs)} query-doc pairs from {split} split")
+    logger.info(f"Loaded {len(pairs)} query-doc pairs")
     return pairs
 
 
-def create_pos_map_from_hotpot(split, graph_path, output_path):
-    """Create qid->positive node mapping from HotpotQA."""
-    dataset = load_dataset("hotpot_qa", "distractor", split=split)
+def create_pos_map_from_hotpot(dataset, graph_path, output_path):
+    """Create qid->positive node mapping from HotpotQA.
+
+    Args:
+        dataset: Pre-loaded HuggingFace dataset
+        graph_path: Path to graph .pt file
+        output_path: Path to save pos_map JSON
+    """
     graph = torch.load(graph_path)
     title_to_id = graph.title_to_id
 
@@ -55,4 +63,4 @@ def create_pos_map_from_hotpot(split, graph_path, output_path):
     with open(output_path, "w") as f:
         json.dump(qid2pos, f)
 
-    logger.info(f"Created pos_map: {len(qid2pos)} queries from {split} split")
+    logger.info(f"Created pos_map: {len(qid2pos)} queries")

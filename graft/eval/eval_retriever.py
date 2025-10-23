@@ -6,7 +6,6 @@ import faiss
 import torch
 import numpy as np
 from tqdm import tqdm
-from datasets import load_dataset
 
 from graft.models.encoder import Encoder
 
@@ -26,7 +25,17 @@ def compute_mrr(retrieved, gold):
     return 0.0
 
 
-def evaluate_retriever(encoder_path, index_path, config, output_path, split="validation"):
+def evaluate_retriever(encoder_path, index_path, config, output_path, dataset, graph):
+    """Evaluate retriever on pre-loaded dataset.
+
+    Args:
+        encoder_path: Path to encoder checkpoint
+        index_path: Path to FAISS index
+        config: Config dict
+        output_path: Path to save results JSON
+        dataset: Pre-loaded HuggingFace dataset
+        graph: Pre-loaded PyG graph
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     encoder = Encoder(
@@ -43,8 +52,6 @@ def evaluate_retriever(encoder_path, index_path, config, output_path, split="val
 
     index = faiss.read_index(index_path)
 
-    dataset = load_dataset("hotpot_qa", "distractor", split=split)
-    graph = torch.load(config["data"]["graph_path"])
     title_to_id = graph.title_to_id
 
     queries = []

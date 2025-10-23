@@ -8,6 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 from accelerate import Accelerator
 from transformers import get_cosine_schedule_with_warmup
+from datasets import load_dataset
 
 from graft.models.encoder import Encoder
 from graft.models.gnn import GraphSAGE
@@ -47,9 +48,13 @@ def train(config_path):
         dropout=cfg["gnn"]["dropout"]
     )
 
+    logger.info("Loading HotpotQA datasets...")
     graph = torch.load(cfg["data"]["graph_path"])
-    train_pairs = load_query_pairs("train", cfg["data"]["graph_path"])
-    dev_pairs = load_query_pairs("validation", cfg["data"]["graph_path"])
+    train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
+    dev_dataset = load_dataset("hotpot_qa", "distractor", split="validation")
+
+    train_pairs = load_query_pairs(train_dataset, cfg["data"]["graph_path"])
+    dev_pairs = load_query_pairs(dev_dataset, cfg["data"]["graph_path"])
 
     sampler = GraphBatchSampler(
         graph=graph,

@@ -4,7 +4,7 @@ experiment:
 
 data:
   dataset: hotpot_qa
-  graph_path: ./data/hotpot/page_graph.pt
+  graph_path: ./datasets/hotpot/page_graph.pt
 
 encoder:
   model_name: intfloat/e5-base-v2
