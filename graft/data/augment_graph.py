@@ -60,7 +60,6 @@ def embed_graph_nodes(graph, config, device=None):
 
     logger.info(f"Embedding {len(node_texts)} nodes...")
 
-    # Pre-allocate for efficiency
     num_nodes = len(node_texts)
     with torch.no_grad():
         for i in tqdm(range(0, num_nodes, batch_size), desc="Embedding"):
@@ -68,17 +67,15 @@ def embed_graph_nodes(graph, config, device=None):
 
             # Use autocast for mixed precision
             if use_amp:
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     batch_embeds = _encode_batch(encoder, batch, config, device)
             else:
                 batch_embeds = _encode_batch(encoder, batch, config, device)
 
-            # Keep on GPU and only transfer at end
-            embeddings.append(batch_embeds)
+            # Move to CPU immediately to avoid GPU memory accumulation
+            embeddings.append(batch_embeds.cpu())
 
-    # Single CPU transfer at the end
-    all_embeddings = torch.cat(embeddings, dim=0)
-    return all_embeddings.cpu().numpy()
+    return torch.cat(embeddings, dim=0).numpy()
 
 
 def _encode_batch(encoder, texts, config, device):

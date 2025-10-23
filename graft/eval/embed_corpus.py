@@ -69,7 +69,7 @@ def embed_corpus(encoder_path, config, output_path):
             batch = corpus_texts[i : i + batch_size]
 
             if use_amp:
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                     if hasattr(encoder, "module"):
                         batch_embeds = encoder.module.encode(batch, device)
                     else:
@@ -80,11 +80,10 @@ def embed_corpus(encoder_path, config, output_path):
                 else:
                     batch_embeds = encoder.encode(batch, device)
 
-            # Keep on GPU
-            embeddings.append(batch_embeds)
+            # Move to CPU immediately to avoid GPU memory accumulation
+            embeddings.append(batch_embeds.cpu())
 
-    # Single CPU transfer at the end
-    all_embeddings = torch.cat(embeddings, dim=0).cpu().numpy()
+    all_embeddings = torch.cat(embeddings, dim=0).numpy()
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_embeddings)
