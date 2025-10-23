@@ -202,22 +202,21 @@ class GRAFTTrainer:
 
     def _training_step(self, batch):
         """Single training step."""
-        # Get texts
-        queries = batch["queries"]
+        # Encode queries
+        query_embeds = self._encode_texts(batch["queries"])
+
+        # Encode nodes
         node_texts = [
             self.graph.node_text[int(nid)] for nid in batch["subgraph"].n_id_cpu.numpy()
         ]
+        node_embeds = self._encode_texts(node_texts)
 
-        # Encode queries + nodes together
-        all_embeds = self._encode_texts(queries + node_texts)
-        query_embeds = all_embeds[: len(queries)]
-        node_embeds = all_embeds[len(queries) :]
+        # GNN
+        node_embeds = self.gnn(
+            node_embeds, batch["subgraph"].edge_index.to(self.device)
+        )
 
-        # GNN forward
-        edge_index = batch["subgraph"].edge_index.to(self.device)
-        node_embeds = self.gnn(node_embeds, edge_index)
-
-        # Labels: find positive node indices in subgraph
+        # Labels
         labels = (
             batch["subgraph"].n_id.unsqueeze(1).to(self.device)
             == batch["pos_nodes"].unsqueeze(0).to(self.device)
@@ -229,7 +228,7 @@ class GRAFTTrainer:
             doc_embeds=node_embeds,
             labels=labels,
             node_embeds=node_embeds,
-            edge_index=edge_index,
+            edge_index=batch["subgraph"].edge_index.to(self.device),
             pos_edges=(
                 batch.get("pos_edges").to(self.device)
                 if batch.get("pos_edges") is not None
