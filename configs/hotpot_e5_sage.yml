@@ -45,7 +45,7 @@ train:
   grad_clip: 1.0
   bf16: true
   seed: 42
-  log_every: 50
+  log_every: 20
   eval_every_steps: 500
 
 eval:
