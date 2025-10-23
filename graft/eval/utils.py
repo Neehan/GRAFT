@@ -81,8 +81,6 @@ def evaluate_retrieval(
         query_texts = [q["question"] for q in batch_queries]
 
         retrieved_batch = retrieval_fn(query_texts, topk)
-        if batch_size == 1:
-            retrieved_batch = [retrieved_batch]
 
         for q, retrieved in zip(batch_queries, retrieved_batch):
             gold_ids = q["gold_ids"]
