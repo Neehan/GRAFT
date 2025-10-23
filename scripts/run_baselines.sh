@@ -20,6 +20,11 @@ cd ${PROJECT_ROOT}
 # Ensure conda libs are prioritized for GLIBCXX compatibility
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
+# Ensure all GPUs are visible (SLURM might restrict)
+if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
+fi
+
 CONFIG_PATH=${1:-configs/hotpot_e5_sage.yml}
 OUTPUT_DIR=${2:-outputs/baselines_test}
 SPLIT=${3:-test}
@@ -28,6 +33,8 @@ echo "=== Running Baselines ==="
 echo "Config: $CONFIG_PATH"
 echo "Output dir: $OUTPUT_DIR"
 echo "Split: $SPLIT"
+echo "GPUs available: $(nvidia-smi --list-gpus | wc -l)"
+nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv
 echo ""
 
 mkdir -p "$OUTPUT_DIR"

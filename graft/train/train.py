@@ -31,20 +31,20 @@ class GRAFTTrainer:
             self.cfg = yaml.safe_load(f)
 
         self.accelerator = Accelerator(
-            mixed_precision="bf16" if self.cfg["train"]["bf16"] else "no",
             gradient_accumulation_steps=self.cfg["train"][
                 "gradient_accumulation_steps"
             ],
         )
         self.device = self.accelerator.device
 
-        wandb.init(
-            project="graft",
-            name=self.cfg["experiment"]["name"],
-            config=self.cfg,
-        )
-        wandb.define_metric("global_step")
-        wandb.define_metric("*", step_metric="global_step")
+        if self.accelerator.is_main_process:
+            wandb.init(
+                project="graft",
+                name=self.cfg["experiment"]["name"],
+                config=self.cfg,
+            )
+            wandb.define_metric("global_step")
+            wandb.define_metric("*", step_metric="global_step")
 
         self._setup_models()
         self._setup_data()
@@ -72,7 +72,8 @@ class GRAFTTrainer:
                 f"Run data preparation first: bash scripts/prepare_data.sh {self.cfg_path}"
             )
 
-        logger.info(f"Using graph: {graph_path}")
+        if self.accelerator.is_main_process:
+            logger.info(f"Using graph: {graph_path}")
         return str(graph_path)
 
     def _setup_models(self):
@@ -91,21 +92,24 @@ class GRAFTTrainer:
         )
 
     def _setup_data(self):
-        logger.info("Loading mteb/hotpotqa datasets...")
+        if self.accelerator.is_main_process:
+            logger.info("Loading mteb/hotpotqa datasets...")
         graph_path = self._get_graph_path()
         self.graph = torch.load(graph_path, weights_only=False)
 
         train_pairs = load_query_pairs("train", graph_path)
         dev_pairs = load_query_pairs("dev", graph_path)
 
-        self.sampler = GraphBatchSampler(
-            graph=self.graph,
-            train_pairs=train_pairs,
-            query_batch_size=self.cfg["train"]["query_batch_size"],
-            fanouts=self.cfg["gnn"]["fanouts"],
-        )
+        with self.accelerator.main_process_first():
+            self.sampler = GraphBatchSampler(
+                graph=self.graph,
+                train_pairs=train_pairs,
+                query_batch_size=self.cfg["train"]["query_batch_size"],
+                fanouts=self.cfg["gnn"]["fanouts"],
+            )
 
-        logger.info("Building fixed eval set with sampled negatives...")
+        if self.accelerator.is_main_process:
+            logger.info("Building fixed eval set with sampled negatives...")
         self.eval_data = self._build_fixed_eval_set(dev_pairs)
 
     def _setup_training(self):
@@ -164,9 +168,10 @@ class GRAFTTrainer:
                 }
             )
 
-        logger.info(
-            f"Built fixed eval set: {len(eval_set)} queries, {num_negatives} negatives each"
-        )
+        if self.accelerator.is_main_process:
+            logger.info(
+                f"Built fixed eval set: {len(eval_set)} queries, {num_negatives} negatives each"
+            )
         return eval_set
 
     def _training_step(self, batch):
@@ -246,41 +251,54 @@ class GRAFTTrainer:
             ):
                 batch_end = min(batch_start + query_batch_size, total)
                 batch_items = self.eval_data[batch_start:batch_end]
+                batch_size = len(batch_items)
 
                 queries = [item["query"] for item in batch_items]
                 query_embeds = self.encoder.encode(queries, self.device)
 
-                for i, item in enumerate(batch_items):
-                    candidate_texts = item["candidate_texts"]
-                    candidate_embeds = self.encoder.encode(candidate_texts, self.device)
+                all_candidates = []
+                num_candidates_per_query = len(batch_items[0]["candidate_texts"])
+                for item in batch_items:
+                    all_candidates.extend(item["candidate_texts"])
 
-                    scores = torch.matmul(
-                        query_embeds[i : i + 1], candidate_embeds.T
-                    ).squeeze(0)
-                    top_k_indices = torch.topk(
-                        scores, k=min(recall_k, len(scores))
-                    ).indices
+                candidate_embeds = self.encoder.encode(all_candidates, self.device)
+                candidate_embeds = candidate_embeds.reshape(
+                    batch_size, num_candidates_per_query, -1
+                )
 
-                    if 0 in top_k_indices:
-                        correct += 1
+                scores = torch.bmm(
+                    query_embeds.unsqueeze(1), candidate_embeds.transpose(1, 2)
+                ).squeeze(1)
+
+                top_k_indices = torch.topk(
+                    scores, k=min(recall_k, scores.size(1)), dim=1
+                ).indices
+
+                correct += (top_k_indices == 0).any(dim=1).sum().item()
 
         return correct / total
 
     def _save_checkpoint(self, tag):
         """Save model checkpoints."""
-        output_dir = Path(self.cfg["experiment"]["output_dir"])
-        output_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(self.encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
-        torch.save(self.gnn.state_dict(), output_dir / f"gnn_{tag}.pt")
+        if self.accelerator.is_main_process:
+            output_dir = Path(self.cfg["experiment"]["output_dir"])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
+            unwrapped_gnn = self.accelerator.unwrap_model(self.gnn)
+            torch.save(unwrapped_encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
+            torch.save(unwrapped_gnn.state_dict(), output_dir / f"gnn_{tag}.pt")
 
     def train(self):
         """Main training loop."""
-        logger.info("Running zero-shot evaluation...")
-        zero_shot_recall = self._evaluate()
-        logger.info(
-            f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
-        )
-        wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+        if self.accelerator.is_main_process:
+            logger.info("Running zero-shot evaluation...")
+            zero_shot_recall = self._evaluate()
+            logger.info(
+                f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+            )
+            wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+
+        self.accelerator.wait_for_everyone()
 
         for epoch in range(self.cfg["train"]["epochs"]):
             self.encoder.train()
@@ -317,18 +335,19 @@ class GRAFTTrainer:
                         self.accelerator.sync_gradients
                         and self.global_step % self.cfg["train"]["log_every"] == 0
                     ):
-                        metrics = {
-                            "global_step": self.global_step,
-                            "loss": loss.item(),
-                            "loss_q2d": loss_q2d.item(),
-                            "loss_nbr": loss_nbr.item(),
-                            "lr_encoder": self.scheduler.get_last_lr()[0],
-                            "lr_gnn": self.scheduler.get_last_lr()[1],
-                        }
-                        wandb.log(metrics)
-                        logger.info(
-                            f"Step {self.global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}"
-                        )
+                        if self.accelerator.is_main_process:
+                            metrics = {
+                                "global_step": self.global_step,
+                                "loss": loss.item(),
+                                "loss_q2d": loss_q2d.item(),
+                                "loss_nbr": loss_nbr.item(),
+                                "lr_encoder": self.scheduler.get_last_lr()[0],
+                                "lr_gnn": self.scheduler.get_last_lr()[1],
+                            }
+                            wandb.log(metrics)
+                            logger.info(
+                                f"Step {self.global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}"
+                            )
 
                     if self.accelerator.sync_gradients:
                         pbar.set_postfix(
@@ -342,25 +361,30 @@ class GRAFTTrainer:
                         and self.global_step % self.cfg["train"]["eval_every_steps"]
                         == 0
                     ):
-                        torch.cuda.empty_cache()
-                        logger.info(f"Running evaluation at step {self.global_step}...")
-                        recall = self._evaluate()
-                        logger.info(
-                            f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
-                        )
-                        wandb.log(
-                            {"global_step": self.global_step, "dev_recall": recall}
-                        )
+                        if self.accelerator.is_main_process:
+                            torch.cuda.empty_cache()
+                            logger.info(
+                                f"Running evaluation at step {self.global_step}..."
+                            )
+                            recall = self._evaluate()
+                            logger.info(
+                                f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
+                            )
+                            wandb.log(
+                                {"global_step": self.global_step, "dev_recall": recall}
+                            )
 
-                        if recall > self.best_recall:
-                            self.best_recall = recall
-                            self._save_checkpoint("best")
+                            if recall > self.best_recall:
+                                self.best_recall = recall
+                                self._save_checkpoint("best")
 
+                        self.accelerator.wait_for_everyone()
                         self.encoder.train()
                         self.gnn.train()
 
         self._save_checkpoint("final")
-        wandb.finish()
+        if self.accelerator.is_main_process:
+            wandb.finish()
 
 
 if __name__ == "__main__":

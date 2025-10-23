@@ -23,7 +23,12 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 CONFIG_PATH=${1:-configs/hotpot_e5_sage.yml}
 
 echo "Training GRAFT with config: $CONFIG_PATH"
+echo "Using $(nvidia-smi --list-gpus | wc -l) GPUs"
 
-python -m graft.train.train "$CONFIG_PATH"
+accelerate launch \
+    --num_processes 4 \
+    --multi_gpu \
+    --mixed_precision bf16 \
+    graft/train/train.py "$CONFIG_PATH"
 
 echo "Training complete!"
