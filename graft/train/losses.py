@@ -4,14 +4,21 @@ import torch
 import torch.nn.functional as F
 
 
-def info_nce_loss(query_embeds, doc_embeds, labels, tau):
+def info_nce_loss(query_embeds, doc_embeds, labels, tau, hard_neg_embeds=None):
     """
     query_embeds: (B, D)
     doc_embeds: (N, D) where N = B * (1 + num_negatives)
     labels: (B,) indices of positives in doc_embeds
     tau: temperature
+    hard_neg_embeds: (B, K, D) optional hard negatives for each query
     """
     scores = torch.matmul(query_embeds, doc_embeds.T) / tau
+
+    if hard_neg_embeds is not None:
+        B, K, D = hard_neg_embeds.shape
+        hard_scores = torch.matmul(query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)).squeeze(1) / tau
+        scores = torch.cat([scores, hard_scores], dim=1)
+
     return F.cross_entropy(scores, labels)
 
 
@@ -55,11 +62,11 @@ def link_prediction_loss(node_embeds, pos_edges, neg_edges):
     return (pos_loss + neg_loss) / 2
 
 
-def compute_total_loss(query_embeds, doc_embeds, labels, node_embeds, edge_index, pos_edges, neg_edges, lambda_q2d, tau, tau_graph, alpha_link):
+def compute_total_loss(query_embeds, doc_embeds, labels, node_embeds, edge_index, pos_edges, neg_edges, lambda_q2d, tau, tau_graph, alpha_link, hard_neg_embeds=None):
     """
     Combine all losses
     """
-    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau)
+    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau, hard_neg_embeds)
 
     loss_nbr = neighbor_contrast_loss(node_embeds, edge_index, tau_graph)
 

@@ -94,13 +94,9 @@ def train(config_path):
         for batch in pbar:
             queries = batch["queries"]
             pos_nodes = batch["pos_nodes"]
-            neg_nodes = batch["neg_nodes"]
             subgraph = batch["subgraph"]
 
-            if global_step > 0 and global_step % cfg["train"]["hardneg_refresh_steps"] == 0:
-                logger.info(f"Refreshing hard negatives at step {global_step}")
-                miner.build_index(graph.node_text)
-                neg_nodes = miner.mine_hard_negatives(queries, pos_nodes, k=5)
+            hard_neg_nodes = None
 
             query_encoded = encoder.tokenizer(
                 queries,
@@ -114,7 +110,6 @@ def train(config_path):
 
             subgraph_node_ids = subgraph.n_id
             subgraph_texts = [graph.node_text[int(nid)] for nid in subgraph_node_ids.cpu().numpy()]
-
 
             node_encoded = encoder.tokenizer(
                 subgraph_texts,
@@ -135,6 +130,19 @@ def train(config_path):
 
             labels = pos_indices_in_subgraph
 
+            hard_neg_embeds = None
+            if hard_neg_nodes is not None:
+                hard_neg_texts = [graph.node_text[int(nid)] for nid in hard_neg_nodes.cpu().numpy()]
+                hard_neg_encoded = encoder.tokenizer(
+                    hard_neg_texts,
+                    max_length=cfg["encoder"]["max_len"],
+                    padding=True,
+                    truncation=True,
+                    return_tensors="pt"
+                ).to(device)
+                hard_neg_embeds_flat = encoder(hard_neg_encoded["input_ids"], hard_neg_encoded["attention_mask"])
+                hard_neg_embeds = hard_neg_embeds_flat.view(len(queries), 5, -1)
+
             loss, loss_q2d, loss_nbr = compute_total_loss(
                 query_embeds=query_embeds,
                 doc_embeds=node_embeds_gnn,
@@ -146,7 +154,8 @@ def train(config_path):
                 lambda_q2d=cfg["loss"]["lambda_q2d"],
                 tau=cfg["loss"]["tau"],
                 tau_graph=cfg["loss"]["tau_graph"],
-                alpha_link=cfg["loss"]["alpha_link"]
+                alpha_link=cfg["loss"]["alpha_link"],
+                hard_neg_embeds=hard_neg_embeds
             )
 
 
@@ -202,7 +211,9 @@ def evaluate(encoder, dev_pairs, cfg, device):
     num_nodes = len(graph.node_text)
 
     correct = 0
-    total = min(len(dev_pairs), 100)
+    total = min(len(dev_pairs), cfg["eval"]["num_samples"])
+    num_negatives = cfg["eval"]["num_negatives"]
+    recall_k = cfg["eval"]["recall_k"]
 
     with torch.no_grad():
         for i in range(total):
@@ -212,20 +223,20 @@ def evaluate(encoder, dev_pairs, cfg, device):
 
             query_embed = encoder.encode([query], device)
 
-            neg_indices = torch.randint(0, num_nodes, (10,))
+            neg_indices = torch.randint(0, num_nodes, (num_negatives,))
             candidate_indices = torch.cat([torch.tensor([pos_node]), neg_indices])
 
             candidate_texts = [graph.node_text[int(idx)] for idx in candidate_indices]
             candidate_embeds = encoder.encode(candidate_texts, device)
 
             scores = torch.matmul(query_embed, candidate_embeds.T).squeeze(0)
-            top_k_indices = torch.topk(scores, k=min(10, len(scores))).indices
+            top_k_indices = torch.topk(scores, k=min(recall_k, len(scores))).indices
 
             if 0 in top_k_indices:
                 correct += 1
 
-    recall_at_10 = correct / total
-    return recall_at_10
+    recall = correct / total
+    return recall
 
 
 def save_checkpoint(encoder, gnn, output_dir, tag):

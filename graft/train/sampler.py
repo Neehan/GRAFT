@@ -36,6 +36,5 @@ class GraphBatchSampler:
             yield {
                 "queries": queries,
                 "pos_nodes": pos_nodes,
-                "neg_nodes": torch.tensor([]),
                 "subgraph": subgraph
             }
