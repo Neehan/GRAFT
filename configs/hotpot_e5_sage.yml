@@ -52,7 +52,7 @@ eval:
   num_samples: 500
   num_negatives: 300
   recall_k: 10
-  query_batch_size: 64
+  query_batch_size: 32
 
 index:
   type: hnsw # Index type: "flat", "hnsw", or "ivf"
