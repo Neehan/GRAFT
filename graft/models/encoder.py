@@ -6,13 +6,12 @@ from transformers import AutoModel, AutoTokenizer
 
 
 class Encoder(nn.Module):
-    def __init__(self, model_name, max_len, pool, proj_dim, freeze_layers):
+    def __init__(self, model_name, max_len, pool, freeze_layers):
         super().__init__()
         self.model = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.max_len = max_len
         self.pool = pool
-        self.proj_dim = proj_dim
 
         if freeze_layers > 0:
             for param in list(self.model.parameters())[:freeze_layers]:
@@ -24,7 +23,9 @@ class Encoder(nn.Module):
         if self.pool == "cls":
             embeddings = outputs.last_hidden_state[:, 0]
         elif self.pool == "mean":
-            embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(-1, keepdim=True)
+            embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
+                1
+            ) / attention_mask.sum(-1, keepdim=True)
         else:
             raise ValueError(f"Unknown pooling method: {self.pool}")
 
@@ -36,7 +37,7 @@ class Encoder(nn.Module):
             max_length=self.max_len,
             padding=True,
             truncation=True,
-            return_tensors="pt"
+            return_tensors="pt",
         )
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device)
@@ -45,3 +46,50 @@ class Encoder(nn.Module):
             embeddings = self.forward(input_ids, attention_mask)
 
         return embeddings
+
+
+def load_trained_encoder(checkpoint_path, config, device):
+    """Load trained encoder from checkpoint.
+
+    Args:
+        checkpoint_path: Path to encoder checkpoint (.pt file)
+        config: Config dict with encoder settings
+        device: torch device
+
+    Returns:
+        Loaded encoder model
+    """
+    encoder = Encoder(
+        model_name=config["encoder"]["model_name"],
+        max_len=config["encoder"]["max_len"],
+        pool=config["encoder"]["pool"],
+        freeze_layers=0,
+    )
+    encoder.load_state_dict(
+        torch.load(checkpoint_path, map_location=device, weights_only=True)
+    )
+    encoder.to(device)
+    encoder.eval()
+    return encoder
+
+
+def load_zero_shot_encoder(model_name, config, device):
+    """Load zero-shot encoder from HuggingFace.
+
+    Args:
+        model_name: HuggingFace model name
+        config: Config dict with encoder settings
+        device: torch device
+
+    Returns:
+        Zero-shot encoder model
+    """
+    encoder = Encoder(
+        model_name=model_name,
+        max_len=config["encoder"]["max_len"],
+        pool=config["encoder"]["pool"],
+        freeze_layers=0,
+    )
+    encoder.to(device)
+    encoder.eval()
+    return encoder

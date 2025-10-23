@@ -1,0 +1,305 @@
+"""Main training loop for GRAFT with Accelerate, wandb, and hard-negative mining."""
+
+import logging
+import warnings
+import yaml
+import torch
+import wandb
+from pathlib import Path
+from tqdm import tqdm
+from accelerate import Accelerator
+from transformers import get_cosine_schedule_with_warmup
+from datasets import load_dataset
+
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+warnings.filterwarnings("ignore", message=".*Pydantic.*")
+
+from graft.models.encoder import Encoder
+from graft.models.gnn import GraphSAGE
+from graft.train.losses import compute_total_loss
+from graft.train.sampler import GraphBatchSampler
+from graft.data.pair_maker import load_query_pairs
+
+logger = logging.getLogger("graft.train")
+
+
+class GRAFTTrainer:
+    def __init__(self, config_path):
+        with open(config_path) as f:
+            self.cfg = yaml.safe_load(f)
+
+        self.accelerator = Accelerator(
+            mixed_precision="bf16" if self.cfg["train"]["bf16"] else "no"
+        )
+        self.device = self.accelerator.device
+
+        wandb.init(
+            project="graft",
+            name=self.cfg["experiment"]["name"],
+            config=self.cfg,
+        )
+        wandb.define_metric("global_step")
+        wandb.define_metric("*", step_metric="global_step")
+
+        self._setup_models()
+        self._setup_data()
+        self._setup_training()
+
+        self.global_step: int = 0
+        self.best_recall: float = 0.0
+
+    def _setup_models(self):
+        self.encoder = Encoder(
+            model_name=self.cfg["encoder"]["model_name"],
+            max_len=self.cfg["encoder"]["max_len"],
+            pool=self.cfg["encoder"]["pool"],
+            freeze_layers=self.cfg["encoder"]["freeze_layers"],
+        )
+
+        self.gnn = GraphSAGE(
+            in_dim=self.cfg["gnn"]["hidden_dim"],
+            hidden_dim=self.cfg["gnn"]["hidden_dim"],
+            layers=self.cfg["gnn"]["layers"],
+            dropout=self.cfg["gnn"]["dropout"],
+        )
+
+    def _setup_data(self):
+        logger.info("Loading HotpotQA datasets...")
+        self.graph = torch.load(self.cfg["data"]["graph_path"], weights_only=False)
+        train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
+        dev_dataset = load_dataset("hotpot_qa", "distractor", split="validation")
+
+        train_pairs = load_query_pairs(train_dataset, self.cfg["data"]["graph_path"])
+        dev_pairs = load_query_pairs(dev_dataset, self.cfg["data"]["graph_path"])
+
+        self.sampler = GraphBatchSampler(
+            graph=self.graph,
+            train_pairs=train_pairs,
+            batch_size_queries=self.cfg["train"]["batch_size_queries"],
+            fanouts=self.cfg["gnn"]["fanouts"],
+        )
+
+        logger.info("Building fixed eval set with sampled negatives...")
+        self.eval_data = self._build_fixed_eval_set(dev_pairs)
+
+    def _setup_training(self):
+        optimizer = torch.optim.AdamW(
+            [
+                {
+                    "params": self.encoder.parameters(),
+                    "lr": self.cfg["train"]["lr_encoder"],
+                },
+                {"params": self.gnn.parameters(), "lr": self.cfg["train"]["lr_gnn"]},
+            ],
+            weight_decay=self.cfg["train"]["weight_decay"],
+        )
+
+        total_steps = len(self.sampler) * self.cfg["train"]["epochs"]
+        warmup_steps = int(total_steps * self.cfg["train"]["warmup_ratio"])
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, warmup_steps, total_steps
+        )
+
+        self.encoder, self.gnn, self.optimizer, self.scheduler = (
+            self.accelerator.prepare(self.encoder, self.gnn, optimizer, scheduler)
+        )
+
+    def _tokenize(self, texts):
+        """DRY helper for tokenization."""
+        return self.encoder.tokenizer(
+            texts,
+            max_length=self.cfg["encoder"]["max_len"],
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        ).to(self.device)
+
+    def _build_fixed_eval_set(self, dev_pairs):
+        """Build fixed evaluation set with pre-sampled negatives for consistency."""
+        num_nodes = len(self.graph.node_text)
+        num_samples = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
+        num_negatives = self.cfg["eval"]["num_negatives"]
+
+        eval_set = []
+        for i in range(num_samples):
+            pair = dev_pairs[i]
+            pos_node = pair["pos_node"]
+
+            neg_indices = torch.randint(0, num_nodes, (num_negatives,))
+            candidate_indices = torch.cat([torch.tensor([pos_node]), neg_indices])
+            candidate_texts = [
+                self.graph.node_text[int(idx)] for idx in candidate_indices
+            ]
+
+            eval_set.append(
+                {
+                    "query": pair["query"],
+                    "candidate_texts": candidate_texts,
+                }
+            )
+
+        logger.info(
+            f"Built fixed eval set: {len(eval_set)} queries, {num_negatives} negatives each"
+        )
+        return eval_set
+
+    def _training_step(self, batch):
+        """Single training step."""
+        queries = batch["queries"]
+        pos_nodes = batch["pos_nodes"]
+        subgraph = batch["subgraph"]
+
+        query_encoded = self._tokenize(queries)
+        query_embeds = self.encoder(
+            query_encoded["input_ids"], query_encoded["attention_mask"]
+        )
+
+        subgraph_node_ids = subgraph.n_id
+        subgraph_texts = [
+            self.graph.node_text[int(nid)] for nid in subgraph.n_id_cpu.numpy()
+        ]
+
+        node_encoded = self._tokenize(subgraph_texts)
+        node_embeds_raw = self.encoder(
+            node_encoded["input_ids"], node_encoded["attention_mask"]
+        )
+
+        node_embeds_gnn = self.gnn(node_embeds_raw, subgraph.edge_index.to(self.device))
+
+        pos_indices_in_subgraph = torch.tensor(
+            [torch.where(subgraph_node_ids == pid)[0][0].item() for pid in pos_nodes],
+            device=self.device,
+        )
+
+        labels = pos_indices_in_subgraph
+
+        loss, loss_q2d, loss_nbr = compute_total_loss(
+            query_embeds=query_embeds,
+            doc_embeds=node_embeds_gnn,
+            labels=labels,
+            node_embeds=node_embeds_gnn,
+            edge_index=subgraph.edge_index.to(self.device),
+            pos_edges=batch.get("pos_edges"),
+            neg_edges=batch.get("neg_edges"),
+            lambda_q2d=self.cfg["loss"]["lambda_q2d"],
+            tau=self.cfg["loss"]["tau"],
+            tau_graph=self.cfg["loss"]["tau_graph"],
+            alpha_link=self.cfg["loss"]["alpha_link"],
+        )
+
+        return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
+
+    def _evaluate(self):
+        """Evaluate on fixed eval set."""
+        self.encoder.eval()
+
+        correct = 0
+        total = len(self.eval_data)
+        recall_k = self.cfg["eval"]["recall_k"]
+
+        with torch.no_grad():
+            for item in tqdm(self.eval_data, desc="Evaluating"):
+                query = item["query"]
+                candidate_texts = item["candidate_texts"]
+
+                query_embed = self.encoder.encode([query], self.device)
+                candidate_embeds = self.encoder.encode(candidate_texts, self.device)
+
+                scores = torch.matmul(query_embed, candidate_embeds.T).squeeze(0)
+                top_k_indices = torch.topk(scores, k=min(recall_k, len(scores))).indices
+
+                if 0 in top_k_indices:
+                    correct += 1
+
+        return correct / total
+
+    def _save_checkpoint(self, tag):
+        """Save model checkpoints."""
+        output_dir = Path(self.cfg["experiment"]["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(self.encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
+        torch.save(self.gnn.state_dict(), output_dir / f"gnn_{tag}.pt")
+
+    def train(self):
+        """Main training loop."""
+        logger.info("Running zero-shot evaluation...")
+        zero_shot_recall = self._evaluate()
+        logger.info(
+            f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+        )
+        wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+
+        for epoch in range(self.cfg["train"]["epochs"]):
+            self.encoder.train()
+            self.gnn.train()
+
+            pbar = tqdm(
+                self.sampler, desc=f"Epoch {epoch+1}/{self.cfg['train']['epochs']}"
+            )
+
+            for batch in pbar:
+                step_output = self._training_step(batch)
+                loss = step_output["loss"]
+                loss_q2d = step_output["loss_q2d"]
+                loss_nbr = step_output["loss_nbr"]
+
+                self.accelerator.backward(loss)
+
+                if self.cfg["train"]["grad_clip"] > 0:
+                    self.accelerator.clip_grad_norm_(
+                        list(self.encoder.parameters()) + list(self.gnn.parameters()),
+                        self.cfg["train"]["grad_clip"],
+                    )
+
+                self.optimizer.step()
+                self.scheduler.step()
+                self.optimizer.zero_grad()
+
+                self.global_step += 1
+
+                if self.global_step % self.cfg["train"]["log_every"] == 0:
+                    metrics = {
+                        "global_step": self.global_step,
+                        "loss": loss.item(),
+                        "loss_q2d": loss_q2d.item(),
+                        "loss_nbr": loss_nbr.item(),
+                        "lr_encoder": self.scheduler.get_last_lr()[0],
+                        "lr_gnn": self.scheduler.get_last_lr()[1],
+                    }
+                    wandb.log(metrics)
+                    logger.info(
+                        f"Step {self.global_step}: loss={loss.item():.4f}, loss_q2d={loss_q2d.item():.4f}, loss_nbr={loss_nbr.item():.4f}"
+                    )
+
+                pbar.set_postfix(
+                    {"loss": f"{loss.item():.4f}", "step": self.global_step}
+                )
+
+                if self.global_step % self.cfg["train"]["eval_every_steps"] == 0:
+                    logger.info(f"Running evaluation at step {self.global_step}...")
+                    recall = self._evaluate()
+                    logger.info(
+                        f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
+                    )
+                    wandb.log({"global_step": self.global_step, "dev_recall": recall})
+
+                    if recall > self.best_recall:
+                        self.best_recall = recall
+                        self._save_checkpoint("best")
+
+                    self.encoder.train()
+                    self.gnn.train()
+
+        self._save_checkpoint("final")
+        wandb.finish()
+
+
+if __name__ == "__main__":
+    import sys
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    trainer = GRAFTTrainer(sys.argv[1])
+    trainer.train()

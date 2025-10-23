@@ -6,34 +6,38 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
-from graft.models.encoder import Encoder
+from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
 
 logger = logging.getLogger(__name__)
 
 
 def embed_corpus(encoder_path, config, output_path):
+    """Embed corpus with encoder.
+
+    Args:
+        encoder_path: Path to trained checkpoint (.pt) OR HuggingFace model name
+        config: Config dict
+        output_path: Path to save embeddings .npy file
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    encoder = Encoder(
-        model_name=config["encoder"]["model_name"],
-        max_len=config["encoder"]["max_len"],
-        pool=config["encoder"]["pool"],
-        proj_dim=config["encoder"]["proj_dim"],
-        freeze_layers=0
-    )
+    is_checkpoint = Path(encoder_path).exists()
 
-    encoder.load_state_dict(torch.load(encoder_path, map_location=device, weights_only=True))
-    encoder.to(device)
-    encoder.eval()
+    if is_checkpoint:
+        logger.info(f"Loading trained encoder from {encoder_path}")
+        encoder = load_trained_encoder(encoder_path, config, device)
+    else:
+        logger.info(f"Loading zero-shot model: {encoder_path}")
+        encoder = load_zero_shot_encoder(encoder_path, config, device)
 
     graph = torch.load(config["data"]["graph_path"], weights_only=False)
     corpus_texts = graph.node_text
 
     embeddings = []
-    batch_size = 128
+    batch_size = config["encoder"].get("batch_size", 128)
 
     for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
-        batch = corpus_texts[i:i + batch_size]
+        batch = corpus_texts[i : i + batch_size]
         batch_embeds = encoder.encode(batch, device)
         embeddings.append(batch_embeds.cpu().numpy())
 

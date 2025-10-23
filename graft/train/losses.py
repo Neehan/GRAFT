@@ -4,21 +4,14 @@ import torch
 import torch.nn.functional as F
 
 
-def info_nce_loss(query_embeds, doc_embeds, labels, tau, hard_neg_embeds=None):
+def info_nce_loss(query_embeds, doc_embeds, labels, tau):
     """
     query_embeds: (B, D)
     doc_embeds: (N, D) where N = B * (1 + num_negatives)
     labels: (B,) indices of positives in doc_embeds
     tau: temperature
-    hard_neg_embeds: (B, K, D) optional hard negatives for each query
     """
     scores = torch.matmul(query_embeds, doc_embeds.T) / tau
-
-    if hard_neg_embeds is not None:
-        B, K, D = hard_neg_embeds.shape
-        hard_scores = torch.matmul(query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)).squeeze(1) / tau
-        scores = torch.cat([scores, hard_scores], dim=1)
-
     return F.cross_entropy(scores, labels)
 
 
@@ -56,23 +49,39 @@ def link_prediction_loss(node_embeds, pos_edges, neg_edges):
     pos_scores = (node_embeds[pos_src] * node_embeds[pos_dst]).sum(dim=1)
     neg_scores = (node_embeds[neg_src] * node_embeds[neg_dst]).sum(dim=1)
 
-    pos_loss = F.binary_cross_entropy_with_logits(pos_scores, torch.ones_like(pos_scores))
-    neg_loss = F.binary_cross_entropy_with_logits(neg_scores, torch.zeros_like(neg_scores))
+    pos_loss = F.binary_cross_entropy_with_logits(
+        pos_scores, torch.ones_like(pos_scores)
+    )
+    neg_loss = F.binary_cross_entropy_with_logits(
+        neg_scores, torch.zeros_like(neg_scores)
+    )
 
     return (pos_loss + neg_loss) / 2
 
 
-def compute_total_loss(query_embeds, doc_embeds, labels, node_embeds, edge_index, pos_edges, neg_edges, lambda_q2d, tau, tau_graph, alpha_link, hard_neg_embeds=None):
+def compute_total_loss(
+    query_embeds,
+    doc_embeds,
+    labels,
+    node_embeds,
+    edge_index,
+    pos_edges,
+    neg_edges,
+    lambda_q2d,
+    tau,
+    tau_graph,
+    alpha_link,
+):
     """
     Combine all losses
     """
-    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau, hard_neg_embeds)
+    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau)
 
     loss_nbr = neighbor_contrast_loss(node_embeds, edge_index, tau_graph)
 
     loss = lambda_q2d * loss_q2d + (1 - lambda_q2d) * loss_nbr
 
-    if alpha_link > 0:
+    if alpha_link > 0 and pos_edges is not None and neg_edges is not None:
         loss_link = link_prediction_loss(node_embeds, pos_edges, neg_edges)
         loss = loss + alpha_link * loss_link
 
