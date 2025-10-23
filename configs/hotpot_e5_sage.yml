@@ -29,7 +29,7 @@ gnn:
 loss:
   tau: 0.1
   tau_graph: 0.2
-  lambda_q2d: 0.9 # Increased: primary objective without GNN transformation
+  lambda_q2d: 0.7 # Increased: primary objective without GNN transformation
   alpha_link: 0.0
 
 train:
@@ -49,7 +49,7 @@ train:
 eval:
   num_samples: 500
   num_negatives: 100
-  recall_k: 5
+  recall_k: 2
   query_batch_size: 16
   encoder_batch_size: 128
 
