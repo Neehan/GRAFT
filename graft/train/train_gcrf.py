@@ -85,6 +85,11 @@ def train(config_path):
     global_step = 0
     best_recall = 0.0
 
+    logger.info("Running zero-shot evaluation...")
+    zero_shot_recall = evaluate(encoder, dev_pairs, cfg, device)
+    logger.info(f"Zero-shot: dev_recall@{cfg['eval']['recall_k']}={zero_shot_recall:.4f}")
+    wandb.log({"global_step": 0, f"dev_recall@{cfg['eval']['recall_k']}": zero_shot_recall})
+
     for epoch in range(cfg["train"]["epochs"]):
         encoder.train()
         gnn.train()
@@ -190,8 +195,8 @@ def train(config_path):
             if global_step % cfg["train"]["eval_every_steps"] == 0:
                 logger.info(f"Running evaluation at step {global_step}...")
                 recall = evaluate(encoder, dev_pairs, cfg, device)
-                logger.info(f"Step {global_step}: dev_recall@10={recall:.4f}")
-                wandb.log({"global_step": global_step, "dev_recall@10": recall})
+                logger.info(f"Step {global_step}: dev_recall@{cfg['eval']['recall_k']}={recall:.4f}")
+                wandb.log({"global_step": global_step, f"dev_recall@{cfg['eval']['recall_k']}": recall})
 
                 if recall > best_recall:
                     best_recall = recall
@@ -216,7 +221,7 @@ def evaluate(encoder, dev_pairs, cfg, device):
     recall_k = cfg["eval"]["recall_k"]
 
     with torch.no_grad():
-        for i in range(total):
+        for i in tqdm(range(total), desc="Evaluating"):
             pair = dev_pairs[i]
             query = pair["query"]
             pos_node = pair["pos_node"]
