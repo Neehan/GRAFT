@@ -47,9 +47,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    logger.info(f"Loading HotpotQA {args.split} split and graph...")
-    dataset = load_dataset("hotpot_qa", "distractor", split=args.split)
-
+    logger.info(f"Loading graph...")
     graph_dir = Path(config["data"]["graph_dir"])
     graph_name = config["data"]["graph_name"]
     semantic_k = config["data"].get("semantic_k")
@@ -64,8 +62,8 @@ def main():
     logger.info(f"Loading graph from {graph_path}")
     graph = torch.load(str(graph_path), weights_only=False)
 
-    logger.info("Preparing queries...")
-    queries = prepare_queries(dataset, graph.title_to_id)
+    logger.info(f"Preparing queries from {args.split} split...")
+    queries = prepare_queries(args.split, graph.doc_id_to_id)
     logger.info(f"Loaded {len(queries)} queries")
 
     topk = config["index"]["topk"]

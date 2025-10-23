@@ -139,7 +139,7 @@ def build_knn_edges(embeddings, k):
     logger.info(f"Building FAISS index for {num_nodes} nodes...")
     embeddings = embeddings.astype(np.float32)
     embeddings = np.ascontiguousarray(embeddings)
-    faiss.normalize_L2(embeddings)
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
     index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
 
@@ -147,7 +147,8 @@ def build_knn_edges(embeddings, k):
     distances, indices = index.search(embeddings, k + 1)
 
     edges = []
-    for src_node in tqdm(range(num_nodes), desc="Building edges"):
+    # used min for quick testing
+    for src_node in tqdm(range(min(num_nodes, 10000)), desc="Building edges"):
         neighbors = indices[src_node][1:]
         for dst_node in neighbors:
             edges.append((src_node, int(dst_node)))

@@ -3,7 +3,7 @@ experiment:
   output_dir: ./outputs/graft_hotpot_e5_sage
 
 data:
-  dataset: hotpot_qa
+  dataset: mteb/hotpotqa # Use 'mteb/hotpotqa' for MTEB format or 'hotpot_qa' for legacy
   graph_dir: ./datasets/hotpot
   graph_name: page_graph
   chunk_size: 220

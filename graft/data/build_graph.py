@@ -8,53 +8,67 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
-def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
-    """Build graph from HotpotQA with chunking and supporting fact co-occurrence edges.
+def build_hotpot_graph(
+    corpus, qrels_train, output_path, chunk_size=200, chunk_overlap=50
+):
+    """Build graph from mteb/hotpotqa with chunking and co-occurrence edges.
 
     Args:
-        dataset: Pre-loaded HuggingFace dataset
+        corpus: Filtered corpus dataset (only docs in train split)
+        qrels_train: Train split qrels for building graph edges
         output_path: Path to save graph .pt file
         chunk_size: Max tokens per chunk
         chunk_overlap: Overlapping tokens between chunks
     """
     passage_texts = {}
+    doc_id_to_title = {}
 
-    for item in dataset:
-        for title, sentences in zip(
-            item["context"]["title"], item["context"]["sentences"]
-        ):
-            if title not in passage_texts:
-                passage_texts[title] = " ".join(sentences)
+    for item in corpus:
+        doc_id = item["_id"]
+        title = item["title"]
+        text = item["text"]
+        passage_texts[doc_id] = text
+        doc_id_to_title[doc_id] = title
 
     node_id = 0
-    title_to_node_ids = defaultdict(list)
+    doc_id_to_node_ids = defaultdict(list)
     node_texts = []
     edge_list = []
 
-    for title, text in passage_texts.items():
+    for doc_id, text in passage_texts.items():
         chunks = _chunk_text(text, chunk_size, chunk_overlap)
         chunk_ids = []
 
         for chunk in chunks:
             node_texts.append(chunk)
             chunk_ids.append(node_id)
-            title_to_node_ids[title].append(node_id)
+            doc_id_to_node_ids[doc_id].append(node_id)
             node_id += 1
 
         for i in range(len(chunk_ids) - 1):
             edge_list.append((chunk_ids[i], chunk_ids[i + 1]))
             edge_list.append((chunk_ids[i + 1], chunk_ids[i]))
 
-    for item in dataset:
-        supporting_titles = item.get("supporting_facts", {}).get("title", [])
-        if len(supporting_titles) < 2:
+    query_to_docs = defaultdict(set)
+    for item in qrels_train:
+        qid = item["query-id"]
+        doc_id = item["corpus-id"]
+        score = item["score"]
+
+        if score > 0:
+            query_to_docs[qid].add(doc_id)
+
+    for doc_ids in query_to_docs.values():
+        doc_ids = list(doc_ids)
+        if len(doc_ids) < 2:
             continue
 
-        for i, title1 in enumerate(supporting_titles):
-            for title2 in supporting_titles[i + 1 :]:
-                if title1 in title_to_node_ids and title2 in title_to_node_ids:
-                    for node1 in title_to_node_ids[title1]:
-                        for node2 in title_to_node_ids[title2]:
+        for i in range(len(doc_ids)):
+            for j in range(i + 1, len(doc_ids)):
+                doc_id1, doc_id2 = doc_ids[i], doc_ids[j]
+                if doc_id1 in doc_id_to_node_ids and doc_id2 in doc_id_to_node_ids:
+                    for node1 in doc_id_to_node_ids[doc_id1]:
+                        for node2 in doc_id_to_node_ids[doc_id2]:
                             edge_list.append((node1, node2))
                             edge_list.append((node2, node1))
 
@@ -65,9 +79,9 @@ def build_hotpot_graph(dataset, output_path, chunk_size=200, chunk_overlap=50):
 
     graph = Data(edge_index=edge_index)
     graph.node_text = node_texts
-    graph.title_to_node_ids = dict(title_to_node_ids)
-    graph.title_to_id = {
-        title: title_to_node_ids[title][0] for title in title_to_node_ids
+    graph.doc_id_to_node_ids = dict(doc_id_to_node_ids)
+    graph.doc_id_to_id = {
+        doc_id: doc_id_to_node_ids[doc_id][0] for doc_id in doc_id_to_node_ids
     }
 
     num_nodes = len(node_texts)

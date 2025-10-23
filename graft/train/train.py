@@ -87,14 +87,12 @@ class GRAFTTrainer:
         )
 
     def _setup_data(self):
-        logger.info("Loading HotpotQA datasets...")
+        logger.info("Loading mteb/hotpotqa datasets...")
         graph_path = self._get_graph_path()
         self.graph = torch.load(graph_path, weights_only=False)
-        train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
-        dev_dataset = load_dataset("hotpot_qa", "distractor", split="validation")
 
-        train_pairs = load_query_pairs(train_dataset, graph_path)
-        dev_pairs = load_query_pairs(dev_dataset, graph_path)
+        train_pairs = load_query_pairs("train", graph_path)
+        dev_pairs = load_query_pairs("dev", graph_path)
 
         self.sampler = GraphBatchSampler(
             graph=self.graph,

@@ -2,6 +2,7 @@
 
 import logging
 from tqdm import tqdm
+from datasets import load_dataset
 
 from graft.eval.metrics import (
     compute_recall_at_k,
@@ -12,31 +13,43 @@ from graft.eval.metrics import (
 logger = logging.getLogger(__name__)
 
 
-def prepare_queries(dataset, title_to_id):
-    """Extract queries with gold document IDs from dataset.
+def prepare_queries(split, doc_id_to_id):
+    """Extract queries with gold document IDs from mteb/hotpotqa.
 
     Args:
-        dataset: HuggingFace dataset with supporting_facts
-        title_to_id: Mapping from title to document ID
+        split: Dataset split (train/dev/test)
+        doc_id_to_id: Mapping from document ID to node ID
 
     Returns:
         List of dicts with keys: id, question, gold_ids
     """
+    queries_ds = load_dataset("mteb/hotpotqa", "queries", split="queries")
+    qrels_ds = load_dataset("mteb/hotpotqa", "default", split=split)
+
+    qid_to_query = {item["_id"]: item["text"] for item in queries_ds}
+
+    query_gold_docs = {}
+    for item in qrels_ds:
+        qid = item["query-id"]
+        doc_id = item["corpus-id"]
+        score = item["score"]
+
+        if score > 0 and doc_id in doc_id_to_id:
+            if qid not in query_gold_docs:
+                query_gold_docs[qid] = {"query": qid_to_query.get(qid), "gold_ids": []}
+            query_gold_docs[qid]["gold_ids"].append(doc_id_to_id[doc_id])
+
     queries = []
-    for item in dataset:
-        supporting_facts = item.get("supporting_facts", {})
-        if supporting_facts and "title" in supporting_facts:
-            gold_ids = [
-                title_to_id[t] for t in supporting_facts["title"] if t in title_to_id
-            ]
-            if gold_ids:
-                queries.append(
-                    {
-                        "id": item["id"],
-                        "question": item["question"],
-                        "gold_ids": gold_ids,
-                    }
-                )
+    for qid, data in query_gold_docs.items():
+        if data["query"] and data["gold_ids"]:
+            queries.append(
+                {
+                    "id": qid,
+                    "question": data["query"],
+                    "gold_ids": data["gold_ids"],
+                }
+            )
+
     return queries
 
 

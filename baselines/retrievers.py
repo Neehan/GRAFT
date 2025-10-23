@@ -55,7 +55,9 @@ class ZeroShotRetriever(BaseRetriever):
     def search(self, query, k):
         with torch.no_grad():
             query_embed = self.encoder.encode([query], self.device).cpu().numpy()
-            faiss.normalize_L2(query_embed)
+            query_embed = query_embed / np.linalg.norm(
+                query_embed, axis=1, keepdims=True
+            )
             distances, indices = self.index.search(query_embed, k)
             return indices[0].tolist()
 

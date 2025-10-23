@@ -12,7 +12,7 @@ def build_faiss_index(embeddings_path, config, output_path):
     embeddings = np.load(embeddings_path)
     d = embeddings.shape[1]
 
-    faiss.normalize_L2(embeddings)
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
     index_type = config["index"]["faiss_type"]
 

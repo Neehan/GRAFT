@@ -25,14 +25,14 @@ pip install -e .
 
 ## Quickstart
 
-GRAFT uses HuggingFace `datasets` to automatically download HotpotQA. No manual data download needed.
+GRAFT uses HuggingFace `datasets` to automatically download `mteb/hotpotqa`. The corpus is automatically filtered to only include documents used in the train split to prevent data leakage.
 
 ### 1. Prepare data
 ```bash
 bash scripts/prepare_data.sh configs/hotpot_e5_sage.yml
 ```
 
-This builds the base graph and augments it with kNN edges if `semantic_k` is set in the config. Prepared graphs are cached for reuse.
+This loads `mteb/hotpotqa`, filters the corpus to train split documents only, builds the base graph from document co-occurrence in queries, and augments it with kNN edges if `semantic_k` is set in the config. Prepared graphs are cached for reuse.
 
 ### 2. Train
 ```bash
@@ -45,10 +45,10 @@ scripts/run_eval_graft.sh \
   outputs/graft_hotpot_e5_sage/encoder_best.pt \
   configs/hotpot_e5_sage.yml \
   outputs/graft_hotpot_e5_sage \
-  validation
+  dev
 ```
 
-This runs the full GRAFT eval pipeline: embeds corpus with trained encoder, builds FAISS index, computes Recall@K/MRR metrics. Use `validation` split during development.
+This runs the full GRAFT eval pipeline: embeds corpus with trained encoder, builds FAISS index, computes Recall@K/MRR metrics. Use `dev` split during development, `test` for final evaluation.
 
 ### 4. Run baselines (for final paper results)
 ```bash
