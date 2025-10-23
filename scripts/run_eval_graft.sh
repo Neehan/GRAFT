@@ -1,7 +1,21 @@
 #!/bin/bash
-# Evaluate GRAFT: embed corpus → build FAISS → evaluate
+#SBATCH -p mit_preemptable
+#SBATCH -A mit_general
+#SBATCH --job-name=graft_eval
+#SBATCH -N 1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:l40s:2
+#SBATCH --mem=64GB
+#SBATCH -t 2:00:00
+
+module load miniforge/24.3.0-0
+conda activate graft
 
 set -e
+
+PROJECT_ROOT="/home/notadib/projects/GRAFT"
+cd ${PROJECT_ROOT}
 
 # Ensure conda libs are prioritized for GLIBCXX compatibility
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
