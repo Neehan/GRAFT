@@ -114,9 +114,6 @@ class GRAFTTrainer:
         train_pairs = load_query_pairs(
             "train", graph_path, self.cfg, log=self.accelerator.is_main_process
         )
-        dev_pairs = load_query_pairs(
-            "dev", graph_path, self.cfg, log=self.accelerator.is_main_process
-        )
 
         with self.accelerator.main_process_first():
             self.sampler = GraphBatchSampler(
@@ -134,8 +131,8 @@ class GRAFTTrainer:
                 f"{len(self.sampler)} batches per process, "
                 f"{len(self.sampler) * self.accelerator.num_processes} total batches"
             )
-            logger.info("Building fixed eval set with sampled negatives...")
-        self.eval_data = self._build_fixed_eval_set(dev_pairs)
+            logger.info("Loading fixed dev set...")
+        self.eval_data = self._load_fixed_dev_set()
 
     def _setup_training(self):
         optimizer = torch.optim.AdamW(
@@ -172,79 +169,50 @@ class GRAFTTrainer:
         mask = encoded["attention_mask"].to(self.device)
         return self.encoder(ids, mask)
 
-    def _build_fixed_eval_set(self, dev_pairs):
-        """Build fixed evaluation set with hard negatives from graph neighbors."""
-        num_nodes = len(self.graph.node_text)
-        num_samples = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
-        base_negatives = self.cfg["eval"]["num_negatives"]
+    def _load_fixed_dev_set(self):
+        """Load pre-built fixed dev set from disk."""
+        graph_dir = Path(self.cfg["data"]["graph_dir"])
+        graph_name = self.cfg["data"]["graph_name"]
+        semantic_k = self.cfg["data"].get("semantic_k")
+        knn_only = self.cfg["data"].get("knn_only", False)
 
-        # Find max positives to determine total candidates
-        max_positives = max(len(pair["pos_nodes"]) for pair in dev_pairs[:num_samples])
-        total_candidates = max_positives + base_negatives
+        # Construct dev set filename matching the graph
+        if semantic_k is None:
+            dev_set_name = f"{graph_name}_dev_set.pt"
+        else:
+            suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+            dev_set_name = f"{graph_name}{suffix}_dev_set.pt"
 
-        edge_index = self.graph.edge_index
+        dev_set_path = graph_dir / dev_set_name
 
-        eval_set = []
-        for i in range(num_samples):
-            pair = dev_pairs[i]
-            pos_nodes = pair["pos_nodes"]
-            pos_set = set(pos_nodes)
+        if not dev_set_path.exists():
+            raise FileNotFoundError(
+                f"Dev set not found: {dev_set_path}\n"
+                f"Run data preparation first: bash scripts/prepare_data.sh {self.cfg_path}"
+            )
 
-            # Sample hard negatives: neighbors of positive nodes
-            hard_negs = set()
-            for pos_node in pos_nodes:
-                # Get neighbors of this positive node
-                neighbors = edge_index[1][edge_index[0] == pos_node].tolist()
-                hard_negs.update(neighbors)
+        # Load dev set with candidate indices
+        dev_set_raw = torch.load(dev_set_path, weights_only=False)
 
-            # Remove positives from hard negatives
-            hard_negs = list(hard_negs - pos_set)
-
-            # Determine how many negatives we need
-            num_negatives_needed = total_candidates - len(pos_nodes)
-
-            # Use hard negatives first, then fill with random
-            if len(hard_negs) >= num_negatives_needed:
-                # More than enough hard negatives, sample subset
-                hard_neg_indices = torch.randperm(len(hard_negs))[
-                    :num_negatives_needed
-                ].tolist()
-                neg_nodes = [hard_negs[idx] for idx in hard_neg_indices]
-            else:
-                # Not enough hard negatives, use all and fill with random
-                neg_nodes = hard_negs.copy()
-                num_random_needed = num_negatives_needed - len(hard_negs)
-
-                # Sample random negatives (excluding positives and hard negatives)
-                excluded = pos_set | set(hard_negs)
-                random_negs = []
-                while len(random_negs) < num_random_needed:
-                    rand_idx = torch.randint(0, num_nodes, (1,)).item()
-                    if rand_idx not in excluded:
-                        random_negs.append(rand_idx)
-                        excluded.add(rand_idx)
-
-                neg_nodes.extend(random_negs)
-
-            # Combine positives and negatives
-            candidate_indices = pos_nodes + neg_nodes
+        # Convert indices to texts
+        dev_set = []
+        for item in dev_set_raw:
             candidate_texts = [
-                self.graph.node_text[int(idx)] for idx in candidate_indices
+                self.graph.node_text[int(idx)] for idx in item["candidate_indices"]
             ]
-
-            eval_set.append(
+            dev_set.append(
                 {
-                    "query": pair["query"],
+                    "query": item["query"],
                     "candidate_texts": candidate_texts,
-                    "num_positives": len(pos_nodes),
+                    "num_positives": item["num_positives"],
                 }
             )
 
         if self.accelerator.is_main_process:
             logger.info(
-                f"Built fixed eval set: {len(eval_set)} queries, {total_candidates} total candidates each (hard negatives from graph neighbors + random)"
+                f"Loaded fixed dev set from {dev_set_path}: {len(dev_set)} queries"
             )
-        return eval_set
+        return dev_set
 
     def _training_step(self, batch):
         """Single training step."""
@@ -312,7 +280,7 @@ class GRAFTTrainer:
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
 
     def _evaluate(self):
-        """Fast training evaluation: 1 pos + random negatives (proxy for overfitting detection)."""
+        """Dev set evaluation during training for monitoring progress."""
         self.encoder.eval()
 
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
