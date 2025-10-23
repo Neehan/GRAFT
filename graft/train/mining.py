@@ -17,7 +17,7 @@ class HardNegativeMiner:
         embeddings = []
 
         for i in range(0, len(corpus_texts), 128):
-            batch = corpus_texts[i:i + 128]
+            batch = corpus_texts[i : i + 128]
             batch_embeds = self.encoder.encode(batch, self.device)
             embeddings.append(batch_embeds.cpu().numpy())
 
@@ -29,6 +29,9 @@ class HardNegativeMiner:
         self.index.add(self.corpus_embeddings)
 
     def mine_hard_negatives(self, queries, pos_nodes, k):
+        if self.index is None:
+            raise ValueError("Index not built. Call build_index() first.")
+
         self.encoder.eval()
         query_embeds = self.encoder.encode(queries, self.device).cpu().numpy()
         faiss.normalize_L2(query_embeds)

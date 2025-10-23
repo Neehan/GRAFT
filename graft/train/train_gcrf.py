@@ -91,7 +91,9 @@ def train(config_path):
             neg_nodes = batch["neg_nodes"]
             subgraph = batch["subgraph"]
 
-            if global_step % cfg["train"]["hardneg_refresh_steps"] == 0:
+            if global_step > 0 and global_step % cfg["train"]["hardneg_refresh_steps"] == 0:
+                logger.info(f"Refreshing hard negatives at step {global_step}")
+                miner.build_index(graph.node_text)
                 neg_nodes = miner.mine_hard_negatives(queries, pos_nodes, k=5)
 
             query_encoded = encoder.tokenizer(
