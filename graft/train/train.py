@@ -19,13 +19,13 @@ from graft.models.gnn import GraphSAGE
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.data.pair_maker import load_query_pairs
-from graft.data.augment_graph import augment_with_knn
 
 logger = logging.getLogger("graft.train")
 
 
 class GRAFTTrainer:
     def __init__(self, config_path):
+        self.cfg_path = config_path
         with open(config_path) as f:
             self.cfg = yaml.safe_load(f)
 
@@ -49,8 +49,8 @@ class GRAFTTrainer:
         self.global_step: int = 0
         self.best_recall: float = 0.0
 
-    def _get_or_build_graph(self):
-        """Get graph path, building augmented version if needed."""
+    def _get_graph_path(self):
+        """Get path to prepared graph."""
         graph_dir = Path(self.cfg["data"]["graph_dir"])
         graph_name = self.cfg["data"]["graph_name"]
         semantic_k = self.cfg["data"].get("semantic_k")
@@ -58,31 +58,18 @@ class GRAFTTrainer:
 
         if semantic_k is None:
             graph_path = graph_dir / f"{graph_name}.pt"
-            logger.info(f"Using base graph: {graph_path}")
-            return str(graph_path)
+        else:
+            suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+            graph_path = graph_dir / f"{graph_name}{suffix}.pt"
 
-        suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
-        augmented_path = graph_dir / f"{graph_name}{suffix}.pt"
+        if not graph_path.exists():
+            raise FileNotFoundError(
+                f"Graph not found: {graph_path}\n"
+                f"Run data preparation first: bash scripts/prepare_data.sh {self.cfg_path}"
+            )
 
-        if augmented_path.exists():
-            logger.info(f"Using cached augmented graph: {augmented_path}")
-            return str(augmented_path)
-
-        base_path = graph_dir / f"{graph_name}.pt"
-        logger.info(
-            f"Augmented graph not found. Building from {base_path} with k={semantic_k}, knn_only={knn_only}"
-        )
-
-        augment_with_knn(
-            str(base_path),
-            str(augmented_path),
-            self.cfg,
-            semantic_k,
-            knn_only,
-            force_recompute=False,
-        )
-
-        return str(augmented_path)
+        logger.info(f"Using graph: {graph_path}")
+        return str(graph_path)
 
     def _setup_models(self):
         self.encoder = Encoder(
@@ -101,7 +88,7 @@ class GRAFTTrainer:
 
     def _setup_data(self):
         logger.info("Loading HotpotQA datasets...")
-        graph_path = self._get_or_build_graph()
+        graph_path = self._get_graph_path()
         self.graph = torch.load(graph_path, weights_only=False)
         train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
         dev_dataset = load_dataset("hotpot_qa", "distractor", split="validation")

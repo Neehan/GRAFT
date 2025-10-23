@@ -29,12 +29,12 @@ GRAFT uses HuggingFace `datasets` to automatically download HotpotQA. No manual 
 bash scripts/prepare_data.sh configs/hotpot_e5_sage.yml
 ```
 
+This builds the base graph and augments it with kNN edges if `semantic_k` is set in the config. Prepared graphs are cached for reuse.
+
 ### 2. Train
 ```bash
 bash scripts/run_train.sh configs/hotpot_e5_sage.yml
 ```
-
-If `semantic_k` is set and augmented graph doesn't exist, training will build it automatically. Augmented graphs are cached for reuse.
 
 ### 3. Evaluate GRAFT (embed + build index + compute metrics)
 ```bash
