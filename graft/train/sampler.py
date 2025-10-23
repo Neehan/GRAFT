@@ -5,10 +5,10 @@ from torch_geometric.utils import k_hop_subgraph
 
 
 class GraphBatchSampler:
-    def __init__(self, graph, train_pairs, batch_size_queries, fanouts):
+    def __init__(self, graph, train_pairs, query_batch_size, fanouts):
         self.graph = graph
         self.train_pairs = train_pairs
-        self.batch_size = batch_size_queries
+        self.batch_size = query_batch_size
         self.num_hops = len(fanouts)
 
     def __len__(self):

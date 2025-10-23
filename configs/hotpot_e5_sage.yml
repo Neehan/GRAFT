@@ -35,7 +35,7 @@ loss:
   alpha_link: 0.0
 
 train:
-  batch_size_queries: 32
+  query_batch_size: 32
   gradient_accumulation_steps: 4
   epochs: 1
   lr_encoder: 2.0e-5
@@ -52,6 +52,7 @@ eval:
   num_samples: 500
   num_negatives: 300
   recall_k: 10
+  query_batch_size: 64
 
 index:
   type: hnsw # Index type: "flat", "hnsw", or "ivf"

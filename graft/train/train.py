@@ -101,7 +101,7 @@ class GRAFTTrainer:
         self.sampler = GraphBatchSampler(
             graph=self.graph,
             train_pairs=train_pairs,
-            batch_size_queries=self.cfg["train"]["batch_size_queries"],
+            query_batch_size=self.cfg["train"]["query_batch_size"],
             fanouts=self.cfg["gnn"]["fanouts"],
         )
 
@@ -206,8 +206,9 @@ class GRAFTTrainer:
 
         # Vectorized index lookup - avoid Python loop with .item() syncs
         pos_nodes_tensor = torch.tensor(pos_nodes, device=self.device)
+        subgraph_node_ids_gpu = subgraph_node_ids.to(self.device)
         pos_indices_in_subgraph = (
-            subgraph_node_ids.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
+            subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
         ).nonzero()[:, 0]
 
         labels = pos_indices_in_subgraph
@@ -235,20 +236,33 @@ class GRAFTTrainer:
         correct = 0
         total = len(self.eval_data)
         recall_k = self.cfg["eval"]["recall_k"]
+        query_batch_size = self.cfg["eval"]["query_batch_size"]
 
         with torch.no_grad():
-            for item in tqdm(self.eval_data, desc="Evaluating"):
-                query = item["query"]
-                candidate_texts = item["candidate_texts"]
+            for batch_start in tqdm(
+                range(0, total, query_batch_size),
+                desc="Evaluating",
+                total=(total + query_batch_size - 1) // query_batch_size,
+            ):
+                batch_end = min(batch_start + query_batch_size, total)
+                batch_items = self.eval_data[batch_start:batch_end]
 
-                query_embed = self.encoder.encode([query], self.device)
-                candidate_embeds = self.encoder.encode(candidate_texts, self.device)
+                queries = [item["query"] for item in batch_items]
+                query_embeds = self.encoder.encode(queries, self.device)
 
-                scores = torch.matmul(query_embed, candidate_embeds.T).squeeze(0)
-                top_k_indices = torch.topk(scores, k=min(recall_k, len(scores))).indices
+                for i, item in enumerate(batch_items):
+                    candidate_texts = item["candidate_texts"]
+                    candidate_embeds = self.encoder.encode(candidate_texts, self.device)
 
-                if 0 in top_k_indices:
-                    correct += 1
+                    scores = torch.matmul(
+                        query_embeds[i : i + 1], candidate_embeds.T
+                    ).squeeze(0)
+                    top_k_indices = torch.topk(
+                        scores, k=min(recall_k, len(scores))
+                    ).indices
+
+                    if 0 in top_k_indices:
+                        correct += 1
 
         return correct / total
 
