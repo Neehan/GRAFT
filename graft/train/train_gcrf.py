@@ -111,6 +111,8 @@ def train(config_path):
             subgraph_node_ids = subgraph.n_id
             subgraph_texts = [graph.node_text[int(nid)] for nid in subgraph_node_ids.cpu().numpy()]
 
+            logger.info(f"Step {global_step}: queries={len(queries)}, pos_nodes={pos_nodes.shape}, subgraph_size={len(subgraph_node_ids)}, edges={subgraph.edge_index.size(1)}")
+
             node_encoded = encoder.tokenizer(
                 subgraph_texts,
                 max_length=cfg["encoder"]["max_len"],
@@ -120,8 +122,10 @@ def train(config_path):
             ).to(device)
 
             node_embeds_raw = encoder(node_encoded["input_ids"], node_encoded["attention_mask"])
+            logger.info(f"Step {global_step}: node_embeds_raw shape={node_embeds_raw.shape}, has_nan={torch.isnan(node_embeds_raw).any()}")
 
             node_embeds_gnn = gnn(node_embeds_raw, subgraph.edge_index.to(device))
+            logger.info(f"Step {global_step}: node_embeds_gnn shape={node_embeds_gnn.shape}, has_nan={torch.isnan(node_embeds_gnn).any()}")
 
             pos_indices_in_subgraph = torch.tensor(
                 [torch.where(subgraph_node_ids == pid)[0][0].item() for pid in pos_nodes],
@@ -129,6 +133,7 @@ def train(config_path):
             )
 
             labels = pos_indices_in_subgraph
+            logger.info(f"Step {global_step}: labels={labels}, query_embeds shape={query_embeds.shape}")
 
             loss, loss_q2d, loss_nbr = compute_total_loss(
                 query_embeds=query_embeds,
@@ -143,6 +148,8 @@ def train(config_path):
                 tau_graph=cfg["loss"]["tau_graph"],
                 alpha_link=cfg["loss"]["alpha_link"]
             )
+
+            logger.info(f"Step {global_step}: loss={loss.item()}, q2d={loss_q2d.item()}, nbr={loss_nbr.item()}")
 
             accelerator.backward(loss)
 
