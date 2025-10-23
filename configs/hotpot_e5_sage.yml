@@ -5,6 +5,8 @@ experiment:
 data:
   dataset: hotpot_qa
   graph_path: ./datasets/hotpot/page_graph.pt
+  chunk_size: 220
+  chunk_overlap: 40
 
 encoder:
   model_name: intfloat/e5-base-v2

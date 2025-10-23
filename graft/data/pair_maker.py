@@ -8,14 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 def load_query_pairs(dataset, graph_path):
-    """Load query-doc pairs from HotpotQA HF dataset.
+    """Load query-doc pairs from HotpotQA HF dataset (chunked graph).
 
     Args:
         dataset: Pre-loaded HuggingFace dataset
         graph_path: Path to graph .pt file
     """
     graph = torch.load(graph_path, weights_only=False)
-    title_to_id = graph.title_to_id
+    title_to_node_ids = graph.title_to_node_ids
 
     pairs = []
     for item in dataset:
@@ -25,19 +25,20 @@ def load_query_pairs(dataset, graph_path):
 
         if supporting_facts and "title" in supporting_facts:
             for title in supporting_facts["title"]:
-                if title in title_to_id:
-                    pairs.append({
-                        "query": question,
-                        "pos_node": title_to_id[title],
-                        "qid": qid
-                    })
+                if title in title_to_node_ids:
+                    for node_id in title_to_node_ids[title]:
+                        pairs.append({
+                            "query": question,
+                            "pos_node": node_id,
+                            "qid": qid
+                        })
 
     logger.info(f"Loaded {len(pairs)} query-doc pairs")
     return pairs
 
 
 def create_pos_map_from_hotpot(dataset, graph_path, output_path):
-    """Create qid->positive node mapping from HotpotQA.
+    """Create qid->positive node mapping from HotpotQA (chunked graph).
 
     Args:
         dataset: Pre-loaded HuggingFace dataset
@@ -45,7 +46,7 @@ def create_pos_map_from_hotpot(dataset, graph_path, output_path):
         output_path: Path to save pos_map JSON
     """
     graph = torch.load(graph_path, weights_only=False)
-    title_to_id = graph.title_to_id
+    title_to_node_ids = graph.title_to_node_ids
 
     qid2pos = {}
     for item in dataset:
@@ -55,8 +56,8 @@ def create_pos_map_from_hotpot(dataset, graph_path, output_path):
         if supporting_facts and "title" in supporting_facts:
             pos_ids = []
             for title in supporting_facts["title"]:
-                if title in title_to_id:
-                    pos_ids.append(title_to_id[title])
+                if title in title_to_node_ids:
+                    pos_ids.extend(title_to_node_ids[title])
             if pos_ids:
                 qid2pos[qid] = pos_ids
 

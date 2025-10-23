@@ -9,8 +9,8 @@ from graft.data.build_graph import build_hotpot_graph
 logger = logging.getLogger(__name__)
 
 
-def prepare_hotpot_data(output_dir, split="train"):
-    """Download HotpotQA and build graph."""
+def prepare_hotpot_data(output_dir, split="train", chunk_size=200, chunk_overlap=50):
+    """Download HotpotQA and build graph with chunking."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -19,8 +19,8 @@ def prepare_hotpot_data(output_dir, split="train"):
     logger.info(f"Loading HotpotQA {split} split...")
     dataset = load_dataset("hotpot_qa", "distractor", split=split)
 
-    logger.info(f"Building graph...")
-    build_hotpot_graph(dataset, str(graph_path))
+    logger.info(f"Building graph with chunk_size={chunk_size}, overlap={chunk_overlap}...")
+    build_hotpot_graph(dataset, str(graph_path), chunk_size, chunk_overlap)
     logger.info(f"Data preparation complete! Graph: {graph_path}")
 
 
