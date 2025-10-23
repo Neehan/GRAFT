@@ -5,9 +5,9 @@
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:l40s:2
+#SBATCH --gres=gpu:l40s:4
 #SBATCH --mem=64GB
-#SBATCH -t 2:00:00
+#SBATCH -t 48:00:00
 
 module load miniforge/24.3.0-0
 conda activate graft
