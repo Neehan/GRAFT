@@ -2,6 +2,12 @@
 __pycache__/
 *.py[codz]
 *$py.class
+*.DS_Store
+
+# data
+outputs/
+reports/
+logs/
 
 # C extensions
 *.so

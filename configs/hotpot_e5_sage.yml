@@ -1,0 +1,55 @@
+experiment:
+  name: graft_hotpot_e5_sage
+  output_dir: ./outputs/graft_hotpot_e5_sage
+
+data:
+  dataset: hotpot_qa
+  graph_path: ./data/hotpot/page_graph.pt
+
+encoder:
+  model_name: intfloat/e5-base-v2
+  max_len: 256
+  pool: cls
+  proj_dim: 768
+  freeze_layers: 0
+
+gnn:
+  type: graphsage
+  layers: 2
+  hidden_dim: 768
+  dropout: 0.1
+  fanouts: [15, 10]
+
+loss:
+  tau: 0.07
+  tau_graph: 0.2
+  lambda_q2d: 0.7
+  alpha_link: 0.0
+
+train:
+  batch_size_nodes: 4096
+  batch_size_queries: 128
+  epochs: 2
+  lr_encoder: 2.0e-5
+  lr_gnn: 1.0e-3
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  grad_clip: 1.0
+  bf16: true
+  seed: 42
+  log_every: 50
+  eval_every_steps: 1000
+  hardneg_refresh_steps: 2000
+  accelerator: true
+  devices: auto
+
+index:
+  faiss_type: IVF,HNSW
+  nlist: 4096
+  nprobe: 32
+  topk: 50
+
+rag:
+  generator: gpt-4o-mini
+  topk_ctx: 10
+  prompt_template: ./templates/hotpot.txt
