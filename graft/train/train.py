@@ -163,8 +163,8 @@ class GRAFTTrainer:
             truncation=True,
             return_tensors="pt",
         )
-        ids = encoded["input_ids"].to(self.device).clone()
-        mask = encoded["attention_mask"].to(self.device).clone()
+        ids = encoded["input_ids"].to(self.device)
+        mask = encoded["attention_mask"].to(self.device)
         return self.encoder(ids, mask)
 
     def _build_fixed_eval_set(self, dev_pairs):
@@ -199,14 +199,18 @@ class GRAFTTrainer:
 
     def _training_step(self, batch):
         """Single training step."""
-        # Encode queries
-        query_embeds = self._encode_texts(batch["queries"])
-
-        # Encode nodes
+        # Encode all texts in single forward pass
         node_texts = [
             self.graph.node_text[int(nid)] for nid in batch["subgraph"].n_id_cpu.numpy()
         ]
-        node_embeds = self._encode_texts(node_texts)
+        all_texts = batch["queries"] + node_texts
+        all_embeds = self._encode_texts(all_texts)
+
+        # Split embeddings (use split for proper gradient tracking)
+        num_queries = len(batch["queries"])
+        query_embeds, node_embeds = torch.split(
+            all_embeds, [num_queries, len(node_texts)], dim=0
+        )
 
         # GNN
         node_embeds = self.gnn(
