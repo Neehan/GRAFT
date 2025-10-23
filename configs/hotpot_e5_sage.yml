@@ -46,9 +46,9 @@ train:
   devices: auto
 
 eval:
-  num_samples: 1000
-  num_negatives: 100
-  recall_k: 5
+  num_samples: 500
+  num_negatives: 500
+  recall_k: 10
 
 index:
   faiss_type: IVF,HNSW
