@@ -3,6 +3,9 @@
 
 set -e
 
+# Ensure conda libs are prioritized for GLIBCXX compatibility
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
 ENCODER_PATH=$1
 CONFIG_PATH=$2
 OUTPUT_DIR=$3

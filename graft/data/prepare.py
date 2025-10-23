@@ -43,10 +43,12 @@ def prepare_hotpot_data(config, split="train"):
         augmented_path = output_dir / f"{graph_name}{suffix}.pt"
 
         if augmented_path.exists():
-            logger.info(f"Augmented graph already exists: {augmented_path}")
+            logger.info(
+                f"Augmented Semantic kNN graph already exists: {augmented_path}"
+            )
         else:
             logger.info(
-                f"Augmenting graph with kNN (k={semantic_k}, knn_only={knn_only})..."
+                f"Augmenting graph with Semantic kNN (k={semantic_k}, knn_only={knn_only})..."
             )
             augment_with_knn(
                 str(base_graph_path),

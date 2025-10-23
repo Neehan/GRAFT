@@ -11,9 +11,10 @@ dependencies:
   - pytorch::torchaudio
   - pytorch::pytorch-cuda=12.1
   - nvidia::cuda-toolkit=12.1
-  - conda-forge::faiss-gpu
+  - conda-forge::libstdcxx-ng # Provides GLIBCXX for cluster compatibility
   - pip
   - pip:
+      - faiss-gpu # Using pip version for better portability
       - transformers>=4.30.0
       - accelerate>=0.20.0
       - datasets>=2.16.0,<4.0.0

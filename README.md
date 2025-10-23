@@ -12,12 +12,15 @@ conda activate graft
 pip install -e .
 ```
 
-**Option 2: SLURM (pip only)**
+**Option 2: SLURM/Cluster (with existing conda)**
 ```bash
 module load python/3.10  # or your cluster's Python module
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install faiss-gpu
 pip install -e .
+
+# If you get GLIBCXX errors, ensure conda's libstdc++ is used:
+# All scripts already include: export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 ```
 
 ## Quickstart
