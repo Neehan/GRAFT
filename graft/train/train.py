@@ -197,7 +197,7 @@ class GRAFTTrainer:
 
         query_encoded = self._tokenize(queries)
         query_embeds = self.encoder(
-            query_encoded["input_ids"], query_encoded["attention_mask"]
+            query_encoded["input_ids"].clone(), query_encoded["attention_mask"].clone()
         )
 
         subgraph_node_ids = subgraph.n_id
@@ -213,10 +213,12 @@ class GRAFTTrainer:
         num_nodes = node_encoded["input_ids"].size(0)
 
         for i in range(0, num_nodes, encoder_batch_size):
-            batch_input_ids = node_encoded["input_ids"][i : i + encoder_batch_size]
+            batch_input_ids = node_encoded["input_ids"][
+                i : i + encoder_batch_size
+            ].clone()
             batch_attention_mask = node_encoded["attention_mask"][
                 i : i + encoder_batch_size
-            ]
+            ].clone()
             batch_embeds = self.encoder(batch_input_ids, batch_attention_mask)
             node_embeds_list.append(batch_embeds)
 
@@ -229,10 +231,12 @@ class GRAFTTrainer:
         pos_nodes_tensor = pos_nodes.clone().to(self.device)
         subgraph_node_ids_gpu = subgraph_node_ids.clone().to(self.device)
         pos_indices_in_subgraph = (
-            subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0)
-        ).nonzero()[:, 0]
+            (subgraph_node_ids_gpu.unsqueeze(1) == pos_nodes_tensor.unsqueeze(0))
+            .nonzero()[:, 0]
+            .clone()
+        )
 
-        labels = pos_indices_in_subgraph.contiguous()
+        labels = pos_indices_in_subgraph
 
         pos_edges_gpu = (
             batch.get("pos_edges").clone().to(self.device)
