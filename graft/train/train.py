@@ -168,7 +168,7 @@ class GRAFTTrainer:
         return self.encoder(ids, mask)
 
     def _build_fixed_eval_set(self, dev_pairs):
-        """Build fixed evaluation set with pre-sampled negatives for consistency."""
+        """Build fixed evaluation set with hard negatives from graph neighbors."""
         num_nodes = len(self.graph.node_text)
         num_samples = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
         base_negatives = self.cfg["eval"]["num_negatives"]
@@ -177,15 +177,52 @@ class GRAFTTrainer:
         max_positives = max(len(pair["pos_nodes"]) for pair in dev_pairs[:num_samples])
         total_candidates = max_positives + base_negatives
 
+        edge_index = self.graph.edge_index
+
         eval_set = []
         for i in range(num_samples):
             pair = dev_pairs[i]
             pos_nodes = pair["pos_nodes"]
+            pos_set = set(pos_nodes)
 
-            # Adjust negatives so all queries have same total candidates
-            num_negatives_for_query = total_candidates - len(pos_nodes)
-            neg_indices = torch.randint(0, num_nodes, (num_negatives_for_query,))
-            candidate_indices = torch.cat([torch.tensor(pos_nodes), neg_indices])
+            # Sample hard negatives: neighbors of positive nodes
+            hard_negs = set()
+            for pos_node in pos_nodes:
+                # Get neighbors of this positive node
+                neighbors = edge_index[1][edge_index[0] == pos_node].tolist()
+                hard_negs.update(neighbors)
+
+            # Remove positives from hard negatives
+            hard_negs = list(hard_negs - pos_set)
+
+            # Determine how many negatives we need
+            num_negatives_needed = total_candidates - len(pos_nodes)
+
+            # Use hard negatives first, then fill with random
+            if len(hard_negs) >= num_negatives_needed:
+                # More than enough hard negatives, sample subset
+                hard_neg_indices = torch.randperm(len(hard_negs))[
+                    :num_negatives_needed
+                ].tolist()
+                neg_nodes = [hard_negs[idx] for idx in hard_neg_indices]
+            else:
+                # Not enough hard negatives, use all and fill with random
+                neg_nodes = hard_negs.copy()
+                num_random_needed = num_negatives_needed - len(hard_negs)
+
+                # Sample random negatives (excluding positives and hard negatives)
+                excluded = pos_set | set(hard_negs)
+                random_negs = []
+                while len(random_negs) < num_random_needed:
+                    rand_idx = torch.randint(0, num_nodes, (1,)).item()
+                    if rand_idx not in excluded:
+                        random_negs.append(rand_idx)
+                        excluded.add(rand_idx)
+
+                neg_nodes.extend(random_negs)
+
+            # Combine positives and negatives
+            candidate_indices = pos_nodes + neg_nodes
             candidate_texts = [
                 self.graph.node_text[int(idx)] for idx in candidate_indices
             ]
@@ -200,7 +237,7 @@ class GRAFTTrainer:
 
         if self.accelerator.is_main_process:
             logger.info(
-                f"Built fixed eval set: {len(eval_set)} queries, {total_candidates} total candidates each (max {max_positives} positives + negatives)"
+                f"Built fixed eval set: {len(eval_set)} queries, {total_candidates} total candidates each (hard negatives from graph neighbors + random)"
             )
         return eval_set
 
