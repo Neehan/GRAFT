@@ -50,7 +50,7 @@ eval:
   num_samples: 500
   num_negatives: 300
   recall_k: 10
-  query_batch_size: 32
+  query_batch_size: 8
   encoder_batch_size: 128
 
 index:
