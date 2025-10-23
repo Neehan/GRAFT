@@ -124,12 +124,13 @@ def _encode_batch(encoder, texts, config, device):
     return embeddings
 
 
-def build_knn_edges(embeddings, k):
+def build_knn_edges(embeddings, k, config):
     """Build undirected kNN edges using FAISS.
 
     Args:
         embeddings: numpy array (num_nodes, hidden_dim)
         k: Number of nearest neighbors
+        config: Config dict with batch_size
 
     Returns:
         List of (src, dst) tuples
@@ -143,12 +144,21 @@ def build_knn_edges(embeddings, k):
     index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
 
-    logger.info(f"Querying k={k} nearest neighbors...")
-    distances, indices = index.search(embeddings, k + 1)
+    batch_size = config["data"]["batch_size"]
+    logger.info(f"Querying k={k} nearest neighbors with batch_size={batch_size}...")
+    all_indices = []
 
+    for i in tqdm(range(0, num_nodes, batch_size), desc="kNN search"):
+        batch_end = min(i + batch_size, num_nodes)
+        batch_embeddings = embeddings[i:batch_end]
+        _, batch_indices = index.search(batch_embeddings, k + 1)
+        all_indices.append(batch_indices)
+
+    indices = np.vstack(all_indices)
+
+    logger.info("Building edge list from kNN results...")
     edges = []
-    # used min for quick testing
-    for src_node in tqdm(range(min(num_nodes, 10000)), desc="Building edges"):
+    for src_node in tqdm(range(num_nodes), desc="Building edges"):
         neighbors = indices[src_node][1:]
         for dst_node in neighbors:
             edges.append((src_node, int(dst_node)))
@@ -201,7 +211,7 @@ def augment_with_knn(
             old_degrees[node_id] += 1
     old_mean_degree = old_degrees.float().mean().item()
 
-    knn_edges = build_knn_edges(embeddings, k)
+    knn_edges = build_knn_edges(embeddings, k, config)
 
     if knn_only:
         logger.info(f"Mode: kNN-only (ablation) - using only semantic edges")
