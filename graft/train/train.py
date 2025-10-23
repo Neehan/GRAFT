@@ -21,7 +21,6 @@ warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 from graft.models.encoder import Encoder
-from graft.models.gnn import GraphSAGE
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.data.pair_maker import load_query_pairs
@@ -98,12 +97,7 @@ class GRAFTTrainer:
 
         self.tokenizer = self.encoder.tokenizer
 
-        self.gnn = GraphSAGE(
-            in_dim=self.cfg["gnn"]["hidden_dim"],
-            hidden_dim=self.cfg["gnn"]["hidden_dim"],
-            layers=self.cfg["gnn"]["layers"],
-            dropout=self.cfg["gnn"]["dropout"],
-        )
+        # GNN removed - using graph-aware contrastive learning only
 
     def _setup_data(self):
         if self.accelerator.is_main_process:
@@ -135,13 +129,8 @@ class GRAFTTrainer:
 
     def _setup_training(self):
         optimizer = torch.optim.AdamW(
-            [
-                {
-                    "params": self.encoder.parameters(),
-                    "lr": self.cfg["train"]["lr_encoder"],
-                },
-                {"params": self.gnn.parameters(), "lr": self.cfg["train"]["lr_gnn"]},
-            ],
+            self.encoder.parameters(),
+            lr=self.cfg["train"]["lr_encoder"],
             weight_decay=self.cfg["train"]["weight_decay"],
         )
 
@@ -151,8 +140,8 @@ class GRAFTTrainer:
             optimizer, warmup_steps, total_steps
         )
 
-        self.encoder, self.gnn, self.optimizer, self.scheduler = (
-            self.accelerator.prepare(self.encoder, self.gnn, optimizer, scheduler)
+        self.encoder, self.optimizer, self.scheduler = self.accelerator.prepare(
+            self.encoder, optimizer, scheduler
         )
 
     def _encode_texts(self, texts):
@@ -228,10 +217,8 @@ class GRAFTTrainer:
             all_embeds, [num_queries, len(node_texts)], dim=0
         )
 
-        # GNN
-        node_embeds = self.gnn(
-            node_embeds, batch["subgraph"].edge_index.to(self.device)
-        )
+        # No GNN - use raw embeddings for graph-aware contrastive learning
+        # Graph structure provides training signal via neighbor_contrast_loss
 
         # Labels: Use all positives with soft-OR InfoNCE (sum in numerator, not average)
         # batch["pos_nodes"] is a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
@@ -346,9 +333,7 @@ class GRAFTTrainer:
             output_dir = Path(self.cfg["experiment"]["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-            unwrapped_gnn = self.accelerator.unwrap_model(self.gnn)
             torch.save(unwrapped_encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
-            torch.save(unwrapped_gnn.state_dict(), output_dir / f"gnn_{tag}.pt")
 
     def train(self):
         """Main training loop."""
@@ -364,7 +349,6 @@ class GRAFTTrainer:
 
         for epoch in range(self.cfg["train"]["epochs"]):
             self.encoder.train()
-            self.gnn.train()
 
             total_steps = (
                 len(self.sampler) // self.cfg["train"]["gradient_accumulation_steps"]
@@ -374,7 +358,7 @@ class GRAFTTrainer:
             )
 
             for batch in self.sampler:
-                with self.accelerator.accumulate(self.encoder, self.gnn):
+                with self.accelerator.accumulate(self.encoder):
                     step_output = self._training_step(batch)
                     loss = step_output["loss"]
                     loss_q2d = step_output["loss_q2d"]
@@ -384,8 +368,7 @@ class GRAFTTrainer:
 
                     if self.cfg["train"]["grad_clip"] > 0:
                         self.accelerator.clip_grad_norm_(
-                            list(self.encoder.parameters())
-                            + list(self.gnn.parameters()),
+                            self.encoder.parameters(),
                             self.cfg["train"]["grad_clip"],
                         )
 
@@ -407,7 +390,6 @@ class GRAFTTrainer:
                                 "loss_q2d": loss_q2d.item(),
                                 "loss_nbr": loss_nbr.item(),
                                 "lr_encoder": self.scheduler.get_last_lr()[0],
-                                "lr_gnn": self.scheduler.get_last_lr()[1],
                             }
                             wandb.log(metrics)
                             logger.info(
@@ -445,7 +427,6 @@ class GRAFTTrainer:
 
                         self.accelerator.wait_for_everyone()
                         self.encoder.train()
-                        self.gnn.train()
 
             pbar.close()
 

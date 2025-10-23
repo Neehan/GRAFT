@@ -29,7 +29,7 @@ gnn:
 loss:
   tau: 0.1
   tau_graph: 0.2
-  lambda_q2d: 0.7
+  lambda_q2d: 0.9 # Increased: primary objective without GNN transformation
   alpha_link: 0.0
 
 train:
