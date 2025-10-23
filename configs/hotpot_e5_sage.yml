@@ -33,7 +33,7 @@ loss:
   alpha_link: 0.0
 
 train:
-  query_batch_size: 16
+  query_batch_size: 8
   gradient_accumulation_steps: 8
   epochs: 1
   lr_encoder: 2.0e-5
