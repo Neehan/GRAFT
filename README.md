@@ -15,8 +15,9 @@ pip install -e .
 **Option 2: SLURM (pip only)**
 ```bash
 module load python/3.10  # or your cluster's Python module
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install faiss-gpu
+pip install torch-sparse -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
 pip install -e .
 ```
 

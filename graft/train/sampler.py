@@ -1,7 +1,7 @@
 """GraphSAGE neighbor sampler for batched query-doc pairs with k-hop subgraphs."""
 
 import torch
-from torch_geometric.loader import NeighborSampler
+from torch_geometric.utils import k_hop_subgraph
 
 
 class GraphBatchSampler:
@@ -9,13 +9,7 @@ class GraphBatchSampler:
         self.graph = graph
         self.train_pairs = train_pairs
         self.batch_size = batch_size_queries
-        self.fanouts = fanouts
-        self.neighbor_sampler = NeighborSampler(
-            graph.edge_index,
-            sizes=fanouts,
-            batch_size=batch_size_queries,
-            shuffle=True
-        )
+        self.num_hops = len(fanouts)
 
     def __len__(self):
         return len(self.train_pairs) // self.batch_size
@@ -27,11 +21,16 @@ class GraphBatchSampler:
             queries = [pair["query"] for pair in batch_pairs]
             pos_nodes = torch.tensor([pair["pos_node"] for pair in batch_pairs])
 
-            batch_size, n_id, adjs = next(iter(self.neighbor_sampler([pos_nodes])))
+            subset, edge_index, mapping, edge_mask = k_hop_subgraph(
+                pos_nodes,
+                self.num_hops,
+                self.graph.edge_index,
+                relabel_nodes=True
+            )
 
             subgraph = type('Subgraph', (), {
-                'edge_index': adjs[0].edge_index,
-                'n_id': n_id
+                'edge_index': edge_index,
+                'n_id': subset
             })()
 
             yield {
