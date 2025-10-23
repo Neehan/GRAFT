@@ -270,7 +270,16 @@ class GRAFTTrainer:
                 for item in batch_items:
                     all_candidates.extend(item["candidate_texts"])
 
-                candidate_embeds = unwrapped_encoder.encode(all_candidates, self.device)
+                # Sub-batch candidates to avoid OOM
+                # Use query_batch_size * num_candidates as a guide for max batch
+                candidate_batch_size = query_batch_size * num_candidates_per_query
+                candidate_embeds_list = []
+                for i in range(0, len(all_candidates), candidate_batch_size):
+                    batch = all_candidates[i : i + candidate_batch_size]
+                    batch_embeds = unwrapped_encoder.encode(batch, self.device)
+                    candidate_embeds_list.append(batch_embeds)
+
+                candidate_embeds = torch.cat(candidate_embeds_list, dim=0)
                 candidate_embeds = candidate_embeds.reshape(
                     batch_size, num_candidates_per_query, -1
                 )
