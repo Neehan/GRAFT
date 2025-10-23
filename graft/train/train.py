@@ -2,6 +2,11 @@
 
 import logging
 import warnings
+import os
+
+os.environ["PYTHONWARNINGS"] = "ignore"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+
 import yaml
 import torch
 import wandb
@@ -14,9 +19,6 @@ from datasets import load_dataset
 
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-import os
-
-os.environ["PYTHONWARNINGS"] = "ignore"
 
 from graft.models.encoder import Encoder
 from graft.models.gnn import GraphSAGE

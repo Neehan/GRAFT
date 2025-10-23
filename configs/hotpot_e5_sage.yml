@@ -10,7 +10,7 @@ data:
   chunk_overlap: 40
   batch_size: 2048 # Batch size for inference/embedding per GPU (2x L40S = 4096 total)
   eval_batch_size: 2048 # Batch size for evaluation queries per GPU (no gradients, scaled by GPU count)
-  semantic_k: 5 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
+  semantic_k: null # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
   knn_only: false # If true, use only semantic edges (ablation)
   knn_index_type: hnsw # Index type for kNN search: "flat" (exact, slow) or "hnsw" (approximate, fast)
 
