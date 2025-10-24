@@ -150,7 +150,10 @@ def build_knn_edges(embeddings, k, config):
 
     logger.info("Flat index built")
 
-    batch_size = config["encoder"]["train_batch_size"]
+    batch_size = int(config["index"]["gpu_search_batch_size"])
+    if batch_size <= 0:
+        raise ValueError("index.gpu_search_batch_size must be a positive integer")
+
     logger.info(f"Starting kNN search: k={k}, batch_size={batch_size}...")
     all_indices = []
 
