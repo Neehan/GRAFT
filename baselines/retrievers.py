@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Literal, Union
 
 import faiss
+import os
+
 import numpy as np
 import torch
 from rank_bm25 import BM25Okapi
@@ -121,15 +123,26 @@ class ZeroShotRetriever(BaseRetriever):
             base_index.add(embeddings)
             return base_index
 
-        logger.info(
-            f"Moving flat index to GPU 0 (fp16={use_fp16}, {num_gpus} GPUs available)"
-        )
-        res = faiss.StandardGpuResources()
-        gpu_index = faiss.index_cpu_to_gpu(res, 0, base_index)
+        clone_opts = faiss.GpuMultipleClonerOptions()
+        clone_opts.useFloat16 = use_fp16
+        clone_opts.shard = True
 
-        logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
+        logger.info(
+            f"Adding {embeddings.shape[0]:,} vectors on all {num_gpus} GPUs (sharded, fp16={use_fp16})"
+        )
+        gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
         gpu_index.add(embeddings)
-        return gpu_index
+
+        logger.info(
+            "Copying sharded index back to CPU for efficient large-batch search with OpenMP"
+        )
+        cpu_index = faiss.index_gpu_to_cpu(gpu_index)
+
+        n_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
+        faiss.omp_set_num_threads(n_threads)
+        logger.info(f"FAISS CPU search will use {n_threads} OpenMP threads")
+
+        return cpu_index
 
     def search(self, queries, k):
         is_single = isinstance(queries, str)
