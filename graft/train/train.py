@@ -178,48 +178,42 @@ class GRAFTTrainer:
         return self.encoder(ids, mask)
 
     def _load_fixed_dev_set(self):
-        """Load pre-built fixed dev set from disk."""
-        graph_dir = Path(self.cfg["data"]["graph_dir"])
-        graph_name = self.cfg["data"]["graph_name"]
-        semantic_k = self.cfg["data"].get("semantic_k")
-        knn_only = self.cfg["data"].get("knn_only", False)
+        """Build small dev corpus for fast realistic evaluation."""
+        graph_path = self._get_graph_path()
+        dev_pairs = load_query_pairs("dev", graph_path, self.cfg, log=False)
 
-        # Construct dev set filename matching the graph
-        if semantic_k is None:
-            dev_set_name = f"{graph_name}_dev_set.pt"
-        else:
-            suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
-            dev_set_name = f"{graph_name}{suffix}_dev_set.pt"
+        num_dev_queries = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
+        dev_corpus_size = self.cfg["eval"]["dev_corpus_size"]
+        num_nodes = len(self.graph.node_text)
 
-        dev_set_path = graph_dir / dev_set_name
+        # Collect positives from dev queries
+        pos_nodes = set()
+        for pair in dev_pairs[:num_dev_queries]:
+            pos_nodes.update(pair["pos_nodes"])
 
-        if not dev_set_path.exists():
-            raise FileNotFoundError(
-                f"Dev set not found: {dev_set_path}\n"
-                f"Run data preparation first: bash scripts/prepare_data.sh {self.cfg_path}"
-            )
+        # Sample random negatives
+        num_negatives = dev_corpus_size - len(pos_nodes)
+        all_indices = set(range(num_nodes)) - pos_nodes
+        neg_sample = torch.randperm(len(all_indices))[:num_negatives].tolist()
+        neg_indices = [list(all_indices)[i] for i in neg_sample]
 
-        # Load dev set with candidate indices
-        dev_set_raw = torch.load(dev_set_path, weights_only=False)
+        corpus_indices = list(pos_nodes) + neg_indices
+        perm = torch.randperm(len(corpus_indices))
+        corpus_indices = [corpus_indices[i] for i in perm]
 
-        # Convert indices to texts
+        # Build dev queries with gold positions in corpus
         dev_set = []
-        for item in dev_set_raw:
-            candidate_texts = [
-                self.graph.node_text[int(idx)] for idx in item["candidate_indices"]
-            ]
-            dev_set.append(
-                {
-                    "query": item["query"],
-                    "candidate_texts": candidate_texts,
-                    "num_positives": item["num_positives"],
-                }
-            )
+        for pair in dev_pairs[:num_dev_queries]:
+            gold_ids = set(pair["pos_nodes"])
+            gold_positions = [i for i, idx in enumerate(corpus_indices) if idx in gold_ids]
+            dev_set.append({"query": pair["query"], "gold_positions": gold_positions})
 
         if self.accelerator.is_main_process:
             logger.info(
-                f"Loaded small dev set from {dev_set_path}: {len(dev_set)} queries"
+                f"Dev: {len(dev_set)} queries, {len(corpus_indices)} corpus ({len(pos_nodes)} pos)"
             )
+
+        self.dev_corpus_indices = corpus_indices
         return dev_set
 
     def _training_step(self, batch):
@@ -306,61 +300,47 @@ class GRAFTTrainer:
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
 
     def _evaluate(self):
-        """Dev set evaluation during training for monitoring progress."""
+        """Fast realistic dev eval: retrieve from 50k corpus."""
         self.encoder.eval()
-
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-        correct = 0
-        total = len(self.dev_data)
         recall_k = self.cfg["eval"]["recall_k"]
-        query_batch_size = self.cfg["eval"]["query_batch_size"]
+        encoder_batch_size = self.cfg["eval"]["encoder_batch_size"]
 
         with torch.no_grad():
-            for batch_start in tqdm(
-                range(0, total, query_batch_size),
-                desc="Evaluating",
-                total=(total + query_batch_size - 1) // query_batch_size,
-            ):
-                batch_end = min(batch_start + query_batch_size, total)
-                batch_items = self.dev_data[batch_start:batch_end]
-                batch_size = len(batch_items)
+            # Encode dev corpus
+            corpus_texts = [self.graph.node_text[idx] for idx in self.dev_corpus_indices]
+            corpus_embeds = []
+            for i in range(0, len(corpus_texts), encoder_batch_size):
+                batch = corpus_texts[i : i + encoder_batch_size]
+                embeds = unwrapped_encoder.encode(batch, self.device)
+                corpus_embeds.append(embeds)
+            corpus_embeds = torch.cat(corpus_embeds, dim=0)  # (50k, D)
 
-                queries = [item["query"] for item in batch_items]
-                query_embeds = unwrapped_encoder.encode(queries, self.device)
+            # Encode queries and compute scores
+            queries = [item["query"] for item in self.dev_data]
+            query_embeds = []
+            for i in range(0, len(queries), encoder_batch_size):
+                batch = queries[i : i + encoder_batch_size]
+                embeds = unwrapped_encoder.encode(batch, self.device)
+                query_embeds.append(embeds)
+            query_embeds = torch.cat(query_embeds, dim=0)  # (500, D)
 
-                # All queries have same number of candidates now (fixed in _load_fixed_dev_set)
-                all_candidates = []
-                for item in batch_items:
-                    all_candidates.extend(item["candidate_texts"])
+            # Compute all similarities: (500, 50k)
+            scores = torch.matmul(query_embeds, corpus_embeds.T)
 
-                # Encode all candidates at once
-                all_candidate_embeds = unwrapped_encoder.encode(
-                    all_candidates, self.device
-                )
+            # Get top-k per query
+            _, top_k_indices = torch.topk(scores, k=recall_k, dim=1)
 
-                # Reshape into [batch_size, num_candidates, hidden_dim]
-                num_candidates = len(batch_items[0]["candidate_texts"])
-                candidate_embeds = all_candidate_embeds.reshape(
-                    batch_size, num_candidates, -1
-                )
+            # Compute recall@k
+            correct = 0
+            for i, item in enumerate(self.dev_data):
+                gold_set = set(item["gold_positions"])
+                retrieved_set = set(top_k_indices[i].cpu().tolist())
+                if gold_set & retrieved_set:
+                    correct += 1
 
-                scores = torch.bmm(
-                    query_embeds.unsqueeze(1), candidate_embeds.transpose(1, 2)
-                ).squeeze(1)
-
-                top_k_indices = torch.topk(
-                    scores, k=min(recall_k, scores.size(1)), dim=1
-                ).indices
-
-                for j, item in enumerate(batch_items):
-                    num_pos = item["num_positives"]
-                    pos_indices = set(range(num_pos))
-                    retrieved_indices = set(top_k_indices[j].cpu().tolist())
-                    if pos_indices & retrieved_indices:
-                        correct += 1
-
-        return correct / total
+        return correct / len(self.dev_data)
 
     def _save_checkpoint(self, tag):
         """Save model checkpoints."""

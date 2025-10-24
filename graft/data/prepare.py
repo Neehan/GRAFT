@@ -8,8 +8,6 @@ from datasets import load_dataset
 
 from graft.data.build_graph import build_hotpot_graph
 from graft.data.augment_graph import augment_with_knn
-from graft.data.build_dev_set import build_fixed_dev_set
-from graft.data.pair_maker import load_query_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +64,6 @@ def prepare_hotpot_data(config, split="train"):
         final_graph_path = augmented_path
     else:
         final_graph_path = base_graph_path
-
-    # Step 3: Build fixed dev set (DO NOT touch test set during training!)
-    logger.info("Building fixed dev set...")
-    graph = torch.load(final_graph_path, weights_only=False)
-
-    dev_pairs = load_query_pairs("dev", str(final_graph_path), config, log=True)
-    dev_set_path = output_dir / f"{final_graph_path.stem}_dev_set.pt"
-
-    build_fixed_dev_set(graph, dev_pairs, config, str(dev_set_path))
 
     logger.info(f"Data preparation complete! Final graph: {final_graph_path}")
 
