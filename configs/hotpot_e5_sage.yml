@@ -54,6 +54,6 @@ eval:
   confuser_fraction: 0.1
 
 index:
-  use_fp16: true
-  gpu_search_batch_size: 128
+  use_fp16: false
+  gpu_search_batch_size: 32
   topk: 50
