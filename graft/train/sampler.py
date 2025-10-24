@@ -52,13 +52,9 @@ class GraphBatchSampler:
         )
         result = self.sampler.sample_from_nodes(sampler_input)
 
-        print(f"DEBUG: result.edge type={type(result.edge)}")
-        print(f"DEBUG: result.edge={result.edge}")
-        if torch.is_tensor(result.edge):
-            print(f"DEBUG: result.edge.shape={result.edge.shape}")
-            print(f"DEBUG: result.edge.dim()={result.edge.dim()}")
+        edge_index = torch.stack([result.row, result.col], dim=0)
 
-        return result.node, result.edge
+        return result.node, edge_index
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
