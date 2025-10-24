@@ -39,12 +39,21 @@ class ZeroShotRetriever(BaseRetriever):
         self.config = config
         self.num_gpus = torch.cuda.device_count()
         self.index_config = config["index"]
-        self.search_batch_size: Optional[int] = self.index_config["gpu_search_batch_size"]
+        raw_chunk = self.index_config["gpu_search_batch_size"]
+        self.search_batch_size: Optional[int]
+        if raw_chunk:
+            self.search_batch_size = int(raw_chunk)
+        else:
+            self.search_batch_size = None
         self._load_encoder(model_name)
         embeddings = self._load_embeddings(embeddings_source)
         embeddings = self.normalize_embeddings(embeddings)
         device_pref = "cuda" if self.device.type == "cuda" else "cpu"
         self.index = self.build_index(embeddings, self.index_config, device=device_pref)
+        if self.search_batch_size:
+            logger.info(f"FAISS query chunk size set to {self.search_batch_size}")
+        else:
+            logger.info("FAISS query chunking disabled")
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
@@ -147,6 +156,11 @@ class ZeroShotRetriever(BaseRetriever):
                 self.search_batch_size
                 and query_embeds.shape[0] > self.search_batch_size
             ):
+                logger.info(
+                    "FAISS search over %d queries using %d-query chunks",
+                    query_embeds.shape[0],
+                    self.search_batch_size,
+                )
                 indices_batches = []
                 for start in range(0, query_embeds.shape[0], self.search_batch_size):
                     end = min(start + self.search_batch_size, query_embeds.shape[0])

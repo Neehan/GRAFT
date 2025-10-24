@@ -145,9 +145,10 @@ def build_knn_edges(embeddings, k, config):
     embeddings = ZeroShotRetriever.normalize_embeddings(embeddings)
 
     logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
-    use_fp16 = config["index"]["use_fp16"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    index = ZeroShotRetriever.build_index(embeddings, use_fp16, device=device)
+    index = ZeroShotRetriever.build_index(
+        embeddings, config["index"], device=device
+    )
 
     logger.info("Flat index built")
 
