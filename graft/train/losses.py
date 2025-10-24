@@ -1,7 +1,10 @@
 """InfoNCE, neighbor-contrast, and link-prediction losses for graph-conditioned retrieval."""
 
+import logging
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_negs=None):
@@ -42,6 +45,25 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_
         # All labels are valid
         batch_indices = torch.arange(batch_size, device=scores.device).unsqueeze(1)
         pos_mask[batch_indices, labels] = True
+
+    pos_counts = pos_mask.sum(dim=1)
+    neg_counts = num_candidates - pos_counts
+
+    zero_neg_indices = torch.nonzero(neg_counts == 0, as_tuple=False).view(-1).tolist()
+    if zero_neg_indices:
+        logger.warning(
+            "InfoNCE: queries with no negatives detected (indices %s); candidates=%d, pos_counts=%s",
+            zero_neg_indices,
+            num_candidates,
+            pos_counts.detach().cpu().tolist(),
+        )
+    elif logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "InfoNCE stats: candidates=%d, pos_counts=%s, neg_counts=%s",
+            num_candidates,
+            pos_counts.detach().cpu().tolist(),
+            neg_counts.detach().cpu().tolist(),
+        )
 
     # Mask out non-positives with large negative value
     pos_scores = scores.masked_fill(~pos_mask, -1e10)

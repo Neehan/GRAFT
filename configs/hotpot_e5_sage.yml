@@ -24,8 +24,8 @@ graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
 
 loss:
-  tau: 0.1
-  tau_graph: 0.2
+  tau: 0.1 # InfoNCE temperature
+  tau_graph: 0.2 # Graph temperature
   lambda_q2d: 0.9 # Primary retrieval objective (graph structure via neighbor loss)
   alpha_link: 0.0
 
@@ -47,8 +47,8 @@ train:
 
 eval:
   num_samples: 500
-  dev_corpus_size: 50000  # Small corpus for fast dev eval during training
-  recall_k: 10  # Check recall@10 for more granular signal
+  dev_corpus_size: 50000 # Small corpus for fast dev eval during training
+  recall_k: 10 # Check recall@10 for more granular signal
   query_batch_size: 16
   encoder_batch_size: 128
 

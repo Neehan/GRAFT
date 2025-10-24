@@ -24,6 +24,7 @@ from graft.models.encoder import Encoder
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.train.hard_neg_miner import HardNegativeMiner
+from graft.train.dev_set_builder import build_or_load_dev_set
 from graft.data.pair_maker import load_query_pairs
 
 logger = logging.getLogger("graft.train")
@@ -181,46 +182,16 @@ class GRAFTTrainer:
         """Build small dev corpus for fast realistic evaluation."""
         graph_path = self._get_graph_path()
         dev_pairs = load_query_pairs("dev", graph_path, self.cfg, log=False)
-
-        num_dev_queries = min(len(dev_pairs), self.cfg["eval"]["num_samples"])
-        dev_corpus_size = self.cfg["eval"]["dev_corpus_size"]
-        num_nodes = len(self.graph.node_text)
-
-        # Collect positives from dev queries
-        logger.info(f"Loading {num_dev_queries} dev queries...")
-        pos_nodes = set()
-        for pair in dev_pairs[:num_dev_queries]:
-            pos_nodes.update(pair["pos_nodes"])
-
-        # Sample random negatives
-        num_negatives = dev_corpus_size - len(pos_nodes)
-        all_indices = set(range(num_nodes)) - pos_nodes
-        neg_sample = torch.randperm(len(all_indices))[:num_negatives].tolist()
-        neg_indices = [list(all_indices)[i] for i in neg_sample]
-
-        corpus_indices = list(pos_nodes) + neg_indices
-        perm = torch.randperm(len(corpus_indices))
-        corpus_indices = [corpus_indices[i] for i in perm]
-
-        # Build dev queries with gold positions in corpus
-        dev_set = []
-        logger.info(f"Building dev set...")
-        for pair in dev_pairs[:num_dev_queries]:
-            gold_ids = set(pair["pos_nodes"])
-            gold_positions = [
-                i for i, idx in enumerate(corpus_indices) if idx in gold_ids
-            ]
-            dev_set.append({"query": pair["query"], "gold_positions": gold_positions})
-
-        if self.accelerator.is_main_process:
-            logger.info(
-                f"Dev: {len(dev_set)} queries, {len(corpus_indices)} corpus ({len(pos_nodes)} pos)"
-            )
+        dev_set, corpus_indices = build_or_load_dev_set(
+            cfg=self.cfg,
+            graph=self.graph,
+            dev_pairs=dev_pairs,
+            graph_path=graph_path,
+            is_main_process=self.accelerator.is_main_process,
+            logger=logger,
+        )
 
         self.dev_corpus_indices = corpus_indices
-        logger.info(
-            f"Dev set built: {len(dev_set)} queries, {len(corpus_indices)} corpus ({len(pos_nodes)} pos)"
-        )
         return dev_set
 
     def _training_step(self, batch):

@@ -36,6 +36,26 @@ class GraphBatchSampler:
         total_batches = len(self.train_pairs) // self.batch_size
         return total_batches // self.world_size
 
+    def _sample_negative_seed(self, used_nodes):
+        """Pick a random node outside the positive set to enforce contrastive support."""
+        num_nodes = len(self.graph.node_text)
+        if len(used_nodes) >= num_nodes:
+            return None
+
+        used = set(used_nodes)
+
+        # Try a few random draws before falling back to a scan.
+        for _ in range(8):
+            candidate = torch.randint(0, num_nodes, (1,)).item()
+            if candidate not in used:
+                return candidate
+
+        for candidate in range(num_nodes):
+            if candidate not in used:
+                return candidate
+
+        return None
+
     def _sample_neighbors(self, seed_nodes):
         """Fast neighbor sampling using persistent sampler.
 
@@ -83,9 +103,13 @@ class GraphBatchSampler:
             all_pos_nodes = []
             for nodes in pos_nodes_list:
                 all_pos_nodes.extend(nodes)
+            all_pos_nodes = list(dict.fromkeys(all_pos_nodes))
+
+            extra_seed = self._sample_negative_seed(all_pos_nodes)
+            seed_nodes = all_pos_nodes + ([extra_seed] if extra_seed is not None else [])
 
             # Use proper neighbor sampling with fanouts
-            subset, edge_index = self._sample_neighbors(all_pos_nodes)
+            subset, edge_index = self._sample_neighbors(seed_nodes)
 
             num_nodes = len(subset)
             num_pos_edges = edge_index.size(1)
