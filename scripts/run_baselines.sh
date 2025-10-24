@@ -42,22 +42,16 @@ mkdir -p "$OUTPUT_DIR"
 # 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
 echo "=== 1/2: Running Zero-shot E5 ==="
 
-ZERO_SHOT_EMBEDDINGS="$OUTPUT_DIR/zero_shot_embeddings.npy"
 ZERO_SHOT_INDEX="$OUTPUT_DIR/zero_shot_index.faiss"
 
-echo "  Step 1/3: Embedding corpus with zero-shot E5..."
+echo "  Step 1/2: Embedding corpus and building FAISS index..."
 python -m graft.eval.embed_corpus \
     intfloat/e5-base-v2 \
     "$CONFIG_PATH" \
-    "$ZERO_SHOT_EMBEDDINGS"
+    "dummy" \
+    --index-path "$ZERO_SHOT_INDEX"
 
-echo "  Step 2/3: Building FAISS index..."
-python -m graft.eval.build_faiss \
-    "$ZERO_SHOT_EMBEDDINGS" \
-    "$CONFIG_PATH" \
-    "$ZERO_SHOT_INDEX"
-
-echo "  Step 3/3: Evaluating zero-shot E5..."
+echo "  Step 2/2: Evaluating zero-shot E5..."
 python -m graft.eval.evaluate \
     --method zero-shot \
     --model-name intfloat/e5-base-v2 \

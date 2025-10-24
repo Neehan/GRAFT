@@ -7,11 +7,12 @@ from pathlib import Path
 from tqdm import tqdm
 
 from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
+from graft.eval.build_faiss import build_faiss_index_from_embeddings
 
 logger = logging.getLogger(__name__)
 
 
-def embed_corpus(encoder_path, config, output_path):
+def embed_corpus(encoder_path, config, output_path, index_path=None):
     """Embed corpus with encoder.
 
     Args:
@@ -85,12 +86,19 @@ def embed_corpus(encoder_path, config, output_path):
 
     all_embeddings = torch.cat(embeddings, dim=0).numpy()
 
-    # Convert to float16 to save space (15 GB → 7.5 GB for 5M docs)
-    all_embeddings = all_embeddings.astype(np.float16)
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    np.save(output_path, all_embeddings)
-    logger.info(f"Saved embeddings: {all_embeddings.shape} (float16)")
+    if index_path:
+        # Build FAISS index directly (saves disk space - no intermediate .npy file)
+        logger.info(f"Building FAISS index directly (skipping embeddings save)")
+        build_faiss_index_from_embeddings(all_embeddings, config, index_path)
+        logger.info(
+            f"Embeddings shape: {all_embeddings.shape}, Index saved to: {index_path}"
+        )
+    else:
+        # Save embeddings to disk (for kNN graph augmentation)
+        all_embeddings = all_embeddings.astype(np.float16)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        np.save(output_path, all_embeddings)
+        logger.info(f"Saved embeddings: {all_embeddings.shape} (float16)")
 
 
 if __name__ == "__main__":
@@ -102,7 +110,16 @@ if __name__ == "__main__":
         "encoder_path", type=str, help="Path to checkpoint or HF model name"
     )
     parser.add_argument("config", type=str, help="Path to config YAML")
-    parser.add_argument("output", type=str, help="Path to save embeddings .npy")
+    parser.add_argument(
+        "output",
+        type=str,
+        help="Path to save embeddings .npy (or dummy if --index-path)",
+    )
+    parser.add_argument(
+        "--index-path",
+        type=str,
+        help="Build FAISS index directly (skips saving embeddings)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -113,4 +130,4 @@ if __name__ == "__main__":
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    embed_corpus(args.encoder_path, config, args.output)
+    embed_corpus(args.encoder_path, config, args.output, index_path=args.index_path)

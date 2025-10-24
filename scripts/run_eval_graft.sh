@@ -47,22 +47,16 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
-EMBEDDINGS_PATH="$OUTPUT_DIR/embeddings.npy"
 INDEX_PATH="$OUTPUT_DIR/index.faiss"
 RESULTS_PATH="$OUTPUT_DIR/results.json"
 
-# Step 1: Embed corpus with trained encoder
-echo "Step 1/3: Embedding corpus..."
-python -m graft.eval.embed_corpus "$ENCODER_PATH" "$CONFIG_PATH" "$EMBEDDINGS_PATH"
+# Step 1: Embed corpus and build FAISS index directly (saves disk space)
+echo "Step 1/2: Embedding corpus and building FAISS index..."
+python -m graft.eval.embed_corpus "$ENCODER_PATH" "$CONFIG_PATH" "dummy" --index-path "$INDEX_PATH"
 echo ""
 
-# Step 2: Build FAISS index
-echo "Step 2/3: Building FAISS index..."
-python -m graft.eval.build_faiss "$EMBEDDINGS_PATH" "$CONFIG_PATH" "$INDEX_PATH"
-echo ""
-
-# Step 3: Evaluate
-echo "Step 3/3: Evaluating GRAFT..."
+# Step 2: Evaluate
+echo "Step 2/2: Evaluating GRAFT..."
 python -m graft.eval.evaluate \
     --method graft \
     --encoder-path "$ENCODER_PATH" \

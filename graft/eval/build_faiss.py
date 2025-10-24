@@ -8,10 +8,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def build_faiss_index(embeddings_path, config, output_path):
-    embeddings = np.load(embeddings_path)
-
-    # Convert to float32 if stored as float16 (FAISS requires float32)
+def build_faiss_index_from_embeddings(embeddings, config, output_path):
+    """Build FAISS index from embeddings array."""
+    # Convert to float32 if needed (FAISS requires float32)
     if embeddings.dtype == np.float16:
         logger.info("Converting float16 embeddings to float32 for FAISS")
         embeddings = embeddings.astype(np.float32)
@@ -65,6 +64,12 @@ def build_faiss_index(embeddings_path, config, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     faiss.write_index(index, output_path)
     logger.info(f"FAISS index saved: {output_path}")
+
+
+def build_faiss_index(embeddings_path, config, output_path):
+    """Load embeddings from file and build FAISS index (for kNN graph augmentation)."""
+    embeddings = np.load(embeddings_path)
+    build_faiss_index_from_embeddings(embeddings, config, output_path)
 
 
 if __name__ == "__main__":
