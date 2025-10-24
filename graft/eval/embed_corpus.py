@@ -1,4 +1,4 @@
-"""Export encoder-only embeddings for entire corpus (no GNN at inference)."""
+"""Export encoder-only embeddings for entire corpus."""
 
 import logging
 import torch

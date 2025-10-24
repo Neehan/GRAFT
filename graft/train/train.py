@@ -97,8 +97,6 @@ class GRAFTTrainer:
 
         self.tokenizer = self.encoder.tokenizer
 
-        # GNN removed - using graph-aware contrastive learning only
-
     def _setup_data(self):
         if self.accelerator.is_main_process:
             logger.info("Loading mteb/hotpotqa datasets...")
@@ -114,7 +112,7 @@ class GRAFTTrainer:
                 graph=self.graph,
                 train_pairs=train_pairs,
                 query_batch_size=self.cfg["train"]["query_batch_size"],
-                fanouts=self.cfg["gnn"]["fanouts"],
+                fanouts=self.cfg["graph"]["fanouts"],
                 rank=self.accelerator.process_index,
                 world_size=self.accelerator.num_processes,
             )
@@ -216,9 +214,6 @@ class GRAFTTrainer:
         query_embeds, node_embeds = torch.split(
             all_embeds, [num_queries, len(node_texts)], dim=0
         )
-
-        # No GNN - use raw embeddings for graph-aware contrastive learning
-        # Graph structure provides training signal via neighbor_contrast_loss
 
         # Labels: Use all positives with soft-OR InfoNCE (sum in numerator, not average)
         # batch["pos_nodes"] is a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]

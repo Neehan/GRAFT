@@ -54,7 +54,12 @@ class ZeroShotRetriever(BaseRetriever):
         logger.info(f"Loading FAISS index from {index_path}")
         index = faiss.read_index(index_path)
 
-        if self.device.type == "cuda":
+        # Check if index supports GPU (HNSW and some others are CPU-only)
+        index_class_name = index.__class__.__name__
+        cpu_only_types = ["IndexHNSWFlat", "IndexHNSW", "IndexPQ", "IndexLSH"]
+        supports_gpu = index_class_name not in cpu_only_types
+
+        if self.device.type == "cuda" and supports_gpu:
             if self.num_gpus > 1:
                 logger.info(f"Sharding FAISS index across {self.num_gpus} GPUs")
                 co = faiss.GpuMultipleClonerOptions()
@@ -70,6 +75,10 @@ class ZeroShotRetriever(BaseRetriever):
                 logger.info("FAISS index on GPU 0")
         else:
             self.index = index
+            if self.device.type == "cuda" and not supports_gpu:
+                logger.info(
+                    f"Index type {index_class_name} does not support GPU, keeping on CPU (embeddings still GPU-accelerated)"
+                )
 
     def search(self, queries, k):
         is_single = isinstance(queries, str)

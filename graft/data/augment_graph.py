@@ -168,8 +168,8 @@ def build_knn_edges(embeddings, k, config):
         )
         index = faiss.IndexHNSWFlat(dim, m)
         index.hnsw.efConstruction = ef_construction
-        index.hnsw.efSearch = ef_search
         index.add(embeddings)
+        index.hnsw.efSearch = ef_search
         logger.info("HNSW index built")
     elif index_type == "flat":
         logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")

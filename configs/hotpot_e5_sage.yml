@@ -20,16 +20,13 @@ encoder:
   pool: cls
   freeze_layers: 0
 
-gnn:
-  layers: 1
-  hidden_dim: 768
-  dropout: 0.1
-  fanouts: [5]
+graph:
+  fanouts: [5] # Neighborhood sampling for graph-aware training
 
 loss:
   tau: 0.1
   tau_graph: 0.2
-  lambda_q2d: 0.7 # Increased: primary objective without GNN transformation
+  lambda_q2d: 0.9 # Primary retrieval objective (graph structure via neighbor loss)
   alpha_link: 0.0
 
 train:
@@ -37,7 +34,6 @@ train:
   gradient_accumulation_steps: 8
   epochs: 1
   lr_encoder: 2.0e-5
-  lr_gnn: 1.0e-3
   weight_decay: 0.01
   warmup_ratio: 0.05
   grad_clip: 1.0
@@ -48,7 +44,7 @@ train:
 
 eval:
   num_samples: 500
-  num_negatives: 100
+  num_negatives: 200
   recall_k: 2
   query_batch_size: 16
   encoder_batch_size: 128
@@ -57,7 +53,7 @@ index:
   type: hnsw # Index type: "flat", "hnsw", or "ivf"
   hnsw_m: 32
   hnsw_ef_construction: 40
-  hnsw_ef_search: 16
+  hnsw_ef_search: 32
   ivf_nlist: 4096
   ivf_nprobe: 32
   topk: 50

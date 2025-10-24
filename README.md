@@ -1,7 +1,7 @@
 # GRAFT
 Graph Augmented Retriever Fine-Tuning
 
-Fine-tune dual-encoder retrievers using graph message passing over document/entity graphs. Train with GNN to make embeddings relation-aware, then deploy encoder-only for standard ANN retrieval.
+Fine-tune dual-encoder retrievers using graph structure over document graphs. Graph-aware contrastive learning makes embeddings relation-aware, then deploy encoder-only for standard ANN retrieval.
 
 ## Setup
 
@@ -62,7 +62,7 @@ This runs all baselines on the test split (BM25, Zero-shot E5) and saves results
 ```
 graft/
   data/          # Graph builders, kNN augmentation, query-doc pairs
-  models/        # Encoder (HF), GNN (GraphSAGE)
+  models/        # Encoder (HF)
   train/         # Training loop, losses, sampler
   eval/          # Corpus embedding, FAISS, metrics (R@K, nDCG, MRR)
 baselines/       # BM25, Zero-shot retrievers
@@ -72,16 +72,19 @@ scripts/         # Shell scripts for train/eval/prep/augment
 
 ## Config
 
-See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config schema (encoder, GNN, loss weights, training params).
+See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config schema (encoder, graph, loss weights, training params).
 
 ### FAISS Index Types
 
 Configure index type in `index.type`:
 - **`hnsw`** (default): Fast approximate search (~99% recall, recommended for <1M docs)
+  - **CPU-only** index, embeddings still GPU-accelerated
+  - Params: `hnsw_m`, `hnsw_ef_construction`, `hnsw_ef_search`
 - **`flat`**: Exact search (100% recall, slower)
+  - Supports multi-GPU
 - **`ivf`**: Inverted file index for very large corpora (1M+ docs)
-
-Params like `hnsw_m`, `hnsw_ef_construction`, `ivf_nlist` control speed/accuracy tradeoffs.
+  - Supports multi-GPU
+  - Params: `ivf_nlist`, `ivf_nprobe`
 
 ## Losses
 

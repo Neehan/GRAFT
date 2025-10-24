@@ -31,9 +31,15 @@ def build_faiss_index(embeddings_path, config, output_path):
         index.nprobe = nprobe
     elif index_type == "hnsw":
         m = config["index"]["hnsw_m"]
-        logger.info(f"Building HNSW index: M={m}")
+        ef_construction = config["index"]["hnsw_ef_construction"]
+        ef_search = config["index"]["hnsw_ef_search"]
+        logger.info(
+            f"Building HNSW index: M={m}, ef_construction={ef_construction}, ef_search={ef_search}"
+        )
         index = faiss.IndexHNSWFlat(d, m, faiss.METRIC_INNER_PRODUCT)
+        index.hnsw.efConstruction = ef_construction
         index.add(embeddings)
+        index.hnsw.efSearch = ef_search
     elif index_type == "flat":
         logger.info("Building Flat index")
         index = faiss.IndexFlatIP(d)
