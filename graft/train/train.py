@@ -187,6 +187,7 @@ class GRAFTTrainer:
         num_nodes = len(self.graph.node_text)
 
         # Collect positives from dev queries
+        logger.info(f"Loading {num_dev_queries} dev queries...")
         pos_nodes = set()
         for pair in dev_pairs[:num_dev_queries]:
             pos_nodes.update(pair["pos_nodes"])
@@ -203,9 +204,12 @@ class GRAFTTrainer:
 
         # Build dev queries with gold positions in corpus
         dev_set = []
+        logger.info(f"Building dev set...")
         for pair in dev_pairs[:num_dev_queries]:
             gold_ids = set(pair["pos_nodes"])
-            gold_positions = [i for i, idx in enumerate(corpus_indices) if idx in gold_ids]
+            gold_positions = [
+                i for i, idx in enumerate(corpus_indices) if idx in gold_ids
+            ]
             dev_set.append({"query": pair["query"], "gold_positions": gold_positions})
 
         if self.accelerator.is_main_process:
@@ -214,6 +218,9 @@ class GRAFTTrainer:
             )
 
         self.dev_corpus_indices = corpus_indices
+        logger.info(
+            f"Dev set built: {len(dev_set)} queries, {len(corpus_indices)} corpus ({len(pos_nodes)} pos)"
+        )
         return dev_set
 
     def _training_step(self, batch):
@@ -264,9 +271,15 @@ class GRAFTTrainer:
             # Convert pos_nodes (global IDs) to subgraph indices
             pos_indices_list = []
             for pos_nodes in batch["pos_nodes"]:
-                pos_tensor = torch.tensor(pos_nodes, device=self.device, dtype=torch.long)
-                matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(dim=0)
-                pos_indices_list.append(matches.nonzero(as_tuple=False).squeeze(-1).tolist())
+                pos_tensor = torch.tensor(
+                    pos_nodes, device=self.device, dtype=torch.long
+                )
+                matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(
+                    dim=0
+                )
+                pos_indices_list.append(
+                    matches.nonzero(as_tuple=False).squeeze(-1).tolist()
+                )
 
             hard_negs = self.hard_neg_miner.mine_hard_negatives(
                 query_embeds, node_embeds, pos_indices_list
@@ -309,7 +322,9 @@ class GRAFTTrainer:
 
         with torch.no_grad():
             # Encode dev corpus
-            corpus_texts = [self.graph.node_text[idx] for idx in self.dev_corpus_indices]
+            corpus_texts = [
+                self.graph.node_text[idx] for idx in self.dev_corpus_indices
+            ]
             corpus_embeds = []
             for i in range(0, len(corpus_texts), encoder_batch_size):
                 batch = corpus_texts[i : i + encoder_batch_size]
