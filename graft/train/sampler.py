@@ -1,8 +1,11 @@
 """GraphSAGE neighbor sampler for batched query-doc pairs with k-hop subgraphs."""
 
+import logging
 import torch
 from torch_geometric.data import Data
 from torch_geometric.sampler import NeighborSampler, NodeSamplerInput
+
+logger = logging.getLogger(__name__)
 
 
 class GraphBatchSampler:
@@ -48,6 +51,12 @@ class GraphBatchSampler:
             node=seed_tensor,
         )
         result = self.sampler.sample_from_nodes(sampler_input)
+
+        print(f"DEBUG: result.edge type={type(result.edge)}")
+        print(f"DEBUG: result.edge={result.edge}")
+        if torch.is_tensor(result.edge):
+            print(f"DEBUG: result.edge.shape={result.edge.shape}")
+            print(f"DEBUG: result.edge.dim()={result.edge.dim()}")
 
         return result.node, result.edge
 
