@@ -1,8 +1,8 @@
 """GraphSAGE neighbor sampler for batched query-doc pairs with k-hop subgraphs."""
 
 import torch
-from torch_geometric.loader import NeighborLoader
 from torch_geometric.data import Data
+from torch_geometric.sampler import NeighborSampler, NodeSamplerInput
 
 
 class GraphBatchSampler:
@@ -17,10 +17,16 @@ class GraphBatchSampler:
         self.rank = rank
         self.world_size = world_size
 
-        # Create PyG Data object
+        # Create persistent sampler (CPU-based, no workers)
         self.data = Data(
             edge_index=graph.edge_index,
             num_nodes=len(graph.node_text),
+        )
+        self.sampler = NeighborSampler(
+            data=self.data,
+            num_neighbors=fanouts,
+            replace=False,
+            disjoint=False,
         )
 
     def __len__(self):
@@ -28,7 +34,7 @@ class GraphBatchSampler:
         return total_batches // self.world_size
 
     def _sample_neighbors(self, seed_nodes):
-        """Fast neighbor sampling with optimized NeighborLoader.
+        """Fast neighbor sampling using persistent sampler.
 
         Returns:
             subset: All sampled node IDs
@@ -36,22 +42,14 @@ class GraphBatchSampler:
         """
         seed_tensor = torch.tensor(seed_nodes, dtype=torch.long).unique()
 
-        # Use NeighborLoader with optimized settings
-        loader = NeighborLoader(
-            self.data,
-            num_neighbors=self.fanouts,
-            input_nodes=seed_tensor,
-            batch_size=len(seed_tensor),
-            shuffle=False,
-            num_workers=4,  # Parallel workers to reduce CPU bottleneck
-            pin_memory=True,  # Faster GPU transfer
-            persistent_workers=True,  # Keep workers alive
+        # Use persistent sampler (CPU-only, no loader overhead)
+        sampler_input = NodeSamplerInput(
+            input_id=None,
+            node=seed_tensor,
         )
+        result = self.sampler.sample_from_nodes(sampler_input)
 
-        # Get the sampled subgraph
-        sampled_data = next(iter(loader))
-
-        return sampled_data.n_id, sampled_data.edge_index
+        return result.node, result.edge
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
