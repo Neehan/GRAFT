@@ -288,7 +288,7 @@ class GRAFTTrainer:
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
         recall_k = self.config["eval"]["recall_k"]
-        encoder_batch_size = self.config["eval"]["encoder_batch_size"]
+        encoder_batch_size = self.config["encoder"]["dev_batch_size"]
 
         with torch.no_grad():
             # Encode dev corpus
