@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 import faiss
 import numpy as np
@@ -38,12 +38,13 @@ class ZeroShotRetriever(BaseRetriever):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         self.num_gpus = torch.cuda.device_count()
+        self.index_config = config["index"]
+        self.search_batch_size: Optional[int] = self.index_config["gpu_search_batch_size"]
         self._load_encoder(model_name)
-        use_fp16 = config["index"]["use_fp16"]
         embeddings = self._load_embeddings(embeddings_source)
         embeddings = self.normalize_embeddings(embeddings)
         device_pref = "cuda" if self.device.type == "cuda" else "cpu"
-        self.index = self.build_index(embeddings, use_fp16, device=device_pref)
+        self.index = self.build_index(embeddings, self.index_config, device=device_pref)
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
@@ -83,7 +84,10 @@ class ZeroShotRetriever(BaseRetriever):
 
     @staticmethod
     def build_index(
-        embeddings: np.ndarray, use_fp16: bool, *, device: Literal["cuda", "cpu"] = "cuda"
+        embeddings: np.ndarray,
+        index_config: dict,
+        *,
+        device: Literal["cuda", "cpu"] = "cuda",
     ) -> faiss.Index:
         """Construct a sharded IndexFlatIP across all visible GPUs."""
         dim = embeddings.shape[1]
@@ -94,6 +98,7 @@ class ZeroShotRetriever(BaseRetriever):
             base_index.add(embeddings)
             return base_index
 
+        use_fp16 = bool(index_config["use_fp16"])
         if not hasattr(faiss, "get_num_gpus") or not hasattr(
             faiss, "index_cpu_to_all_gpus"
         ):
@@ -114,6 +119,13 @@ class ZeroShotRetriever(BaseRetriever):
         logger.info(f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})")
         gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
 
+        tile_size = index_config["gpu_tile_size"]
+        if tile_size:
+            param_space = faiss.GpuParameterSpace()
+            param_space.initialize(gpu_index)
+            param_space.set_index_parameter(gpu_index, "tileSize", tile_size)
+            logger.info(f"Configured FAISS GPU tileSize={tile_size}")
+
         logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
         gpu_index.add(embeddings)
         return gpu_index
@@ -129,7 +141,20 @@ class ZeroShotRetriever(BaseRetriever):
             query_embeds = query_embeds / np.linalg.norm(
                 query_embeds, axis=1, keepdims=True
             )
-            distances, indices = self.index.search(query_embeds, k)
+            query_embeds = np.ascontiguousarray(query_embeds, dtype=np.float32)
+
+            if (
+                self.search_batch_size
+                and query_embeds.shape[0] > self.search_batch_size
+            ):
+                indices_batches = []
+                for start in range(0, query_embeds.shape[0], self.search_batch_size):
+                    end = min(start + self.search_batch_size, query_embeds.shape[0])
+                    _, idx = self.index.search(query_embeds[start:end], k)
+                    indices_batches.append(idx)
+                indices = np.vstack(indices_batches)
+            else:
+                _, indices = self.index.search(query_embeds, k)
 
         results = [idx.tolist() for idx in indices]
         return results[0] if is_single else results
