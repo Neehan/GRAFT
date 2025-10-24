@@ -21,7 +21,7 @@ encoder:
   freeze_layers: 0
 
 graph:
-  fanouts: [5] # Neighborhood sampling for graph-aware training
+  fanouts: [5, 2] # Neighborhood sampling for graph-aware training
 
 loss:
   tau: 0.1
@@ -32,7 +32,7 @@ loss:
 train:
   query_batch_size: 8
   gradient_accumulation_steps: 8
-  epochs: 1
+  epochs: 3
   lr_encoder: 2.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.05
