@@ -24,7 +24,7 @@ from graft.models.encoder import Encoder
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.train.hard_neg_miner import HardNegativeMiner
-from graft.train.dev_set_builder import build_or_load_dev_set
+from graft.train.dev_utils import build_dev_set
 from graft.data.pair_maker import load_query_pairs
 
 logger = logging.getLogger("graft.train")
@@ -182,11 +182,18 @@ class GRAFTTrainer:
         """Build small dev corpus for fast realistic evaluation."""
         graph_path = self._get_graph_path()
         dev_pairs = load_query_pairs("dev", graph_path, self.cfg, log=False)
-        dev_set, corpus_indices = build_or_load_dev_set(
-            cfg=self.cfg,
+
+        eval_cfg = self.cfg["eval"]
+        eval_seed = eval_cfg.get("seed", self.cfg["train"]["seed"])
+        num_dev_queries = min(len(dev_pairs), eval_cfg["num_samples"])
+
+        dev_set, corpus_indices = build_dev_set(
             graph=self.graph,
             dev_pairs=dev_pairs,
-            graph_path=graph_path,
+            num_dev_queries=num_dev_queries,
+            dev_corpus_size=eval_cfg["dev_corpus_size"],
+            confuser_fraction=eval_cfg.get("confuser_fraction", 0.1),
+            seed=eval_seed,
             is_main_process=self.accelerator.is_main_process,
             logger=logger,
         )

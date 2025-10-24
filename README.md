@@ -99,6 +99,12 @@ Configure index type in `index.type`:
 - **Neighbor contrast**: Graph smoothness over edges
 - **Link prediction** (optional): Edge prediction regularizer
 
+### Training stability notes
+
+- We log per-batch InfoNCE stats; if a query sees zero negatives the warning points at sampler issues.
+- The sampler drops an extra random node into every subgraph so InfoNCE cannot degenerate into an all-positive softmax.
+- Hard negatives are filtered to stay disjoint from the positives, and `loss.tau` is set to 0.1 in the default config to keep logits numerically stable.
+
 Combined as: `L = λ L_q2d + (1-λ) L_nbr + α L_link`
 
 Hard negatives mined from current batch subgraph via similarity ranking (no FAISS overhead).
