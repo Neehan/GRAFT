@@ -56,5 +56,4 @@ eval:
 index:
   use_fp16: true
   gpu_search_batch_size: 128
-  gpu_tile_size: 1048576
   topk: 50

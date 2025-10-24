@@ -127,16 +127,6 @@ class ZeroShotRetriever(BaseRetriever):
         )
         gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
 
-        try:
-            tile_size = int(index_config["gpu_tile_size"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("index.gpu_tile_size must be an integer value") from exc
-
-        param_space = faiss.GpuParameterSpace()
-        param_space.initialize(gpu_index)
-        param_space.set_index_parameter(gpu_index, "tileSize", tile_size)
-        logger.info(f"Configured FAISS GPU tileSize={tile_size}")
-
         logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
         gpu_index.add(embeddings)
         return gpu_index

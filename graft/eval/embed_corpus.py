@@ -24,8 +24,8 @@ def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None)
 
     graph_dir = Path(config["data"]["graph_dir"])
     graph_name = config["data"]["graph_name"]
-    semantic_k = config["data"].get("semantic_k")
-    knn_only = config["data"].get("knn_only", False)
+    semantic_k = config["data"]["semantic_k"]
+    knn_only = config["data"]["knn_only"]
 
     if semantic_k is None:
         graph_path = graph_dir / f"{graph_name}.pt"
