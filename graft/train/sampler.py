@@ -49,10 +49,7 @@ class GraphBatchSampler:
         )
         result = self.sampler.sample_from_nodes(sampler_input)
 
-        # Extract edge_index tensor from EdgeIndex object
-        edge_index = result.edge.edge_index
-
-        return result.node, edge_index
+        return result.node, result.edge
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
