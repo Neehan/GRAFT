@@ -47,7 +47,7 @@ train:
 
 eval:
   num_samples: 500
-  dev_corpus_size: 100000 # Small corpus for fast dev eval during training
+  dev_corpus_size: 75000 # Small corpus for fast dev eval during training
   recall_k: 5 # Check recall@10 for more granular signal
   query_batch_size: 8
   seed: 42
