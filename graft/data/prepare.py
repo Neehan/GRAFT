@@ -22,18 +22,13 @@ def prepare_hotpot_data(config, split="train"):
     graph_name = config["data"]["graph_name"]
     base_graph_path = output_dir / f"{graph_name}.pt"
 
-    logger.info("Loading mteb/hotpotqa corpus, queries, and qrels...")
-    corpus_full = load_dataset("mteb/hotpotqa", "corpus", split="corpus")
+    logger.info("Loading mteb/hotpotqa corpus...")
+    corpus = load_dataset("mteb/hotpotqa", "corpus", split="corpus")
+
+    # Load train qrels for building graph edges (co-occurrence)
     qrels_train = load_dataset("mteb/hotpotqa", "default", split="train")
 
-    logger.info(
-        f"Filtering corpus to only docs used in train split (no data leakage)..."
-    )
-    used_doc_ids = set(qrels_train["corpus-id"])
-    corpus_filtered = corpus_full.filter(lambda x: x["_id"] in used_doc_ids)
-    logger.info(
-        f"Filtered corpus: {len(corpus_filtered)} docs (from {len(corpus_full)})"
-    )
+    logger.info(f"Using full corpus: {len(corpus)} documents")
 
     chunk_size = config["data"]["chunk_size"]
     chunk_overlap = config["data"]["chunk_overlap"]
@@ -42,7 +37,7 @@ def prepare_hotpot_data(config, split="train"):
         f"Building base graph with chunk_size={chunk_size}, overlap={chunk_overlap}..."
     )
     build_hotpot_graph(
-        corpus_filtered, qrels_train, str(base_graph_path), chunk_size, chunk_overlap
+        corpus, qrels_train, str(base_graph_path), chunk_size, chunk_overlap
     )
     logger.info(f"Base graph created: {base_graph_path}")
 

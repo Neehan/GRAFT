@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 
 def build_faiss_index(embeddings_path, config, output_path):
     embeddings = np.load(embeddings_path)
+
+    # Convert to float32 if stored as float16 (FAISS requires float32)
+    if embeddings.dtype == np.float16:
+        logger.info("Converting float16 embeddings to float32 for FAISS")
+        embeddings = embeddings.astype(np.float32)
+
     d = embeddings.shape[1]
 
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -33,10 +39,19 @@ def build_faiss_index(embeddings_path, config, output_path):
         m = config["index"]["hnsw_m"]
         ef_construction = config["index"]["hnsw_ef_construction"]
         ef_search = config["index"]["hnsw_ef_search"]
-        logger.info(
-            f"Building HNSW index: M={m}, ef_construction={ef_construction}, ef_search={ef_search}"
-        )
-        index = faiss.IndexHNSWFlat(d, m, faiss.METRIC_INNER_PRODUCT)
+        quantize = config["index"].get("quantize", False)
+
+        if quantize:
+            logger.info(
+                f"Building HNSW+SQ8 index: M={m}, ef_construction={ef_construction}, ef_search={ef_search}"
+            )
+            index = faiss.index_factory(d, f"HNSW{m},SQ8", faiss.METRIC_INNER_PRODUCT)
+        else:
+            logger.info(
+                f"Building HNSW index: M={m}, ef_construction={ef_construction}, ef_search={ef_search}"
+            )
+            index = faiss.IndexHNSWFlat(d, m, faiss.METRIC_INNER_PRODUCT)
+
         index.hnsw.efConstruction = ef_construction
         index.add(embeddings)
         index.hnsw.efSearch = ef_search

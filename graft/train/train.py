@@ -49,9 +49,20 @@ class GRAFTTrainer:
         self.device = self.accelerator.device
 
         if self.accelerator.is_main_process:
+            # Build run name with kNN info
+            base_name = self.cfg["experiment"]["name"]
+            semantic_k = self.cfg["data"].get("semantic_k", 0)
+            knn_only = self.cfg["data"].get("knn_only", False)
+
+            if semantic_k is not None:
+                suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+                run_name = f"{base_name}{suffix}"
+            else:
+                run_name = base_name
+
             wandb.init(
                 project="graft",
-                name=self.cfg["experiment"]["name"],
+                name=run_name,
                 config=self.cfg,
             )
             wandb.define_metric("global_step")

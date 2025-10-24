@@ -25,7 +25,7 @@ pip install -e .
 
 ## Quickstart
 
-GRAFT uses HuggingFace `datasets` to automatically download `mteb/hotpotqa`. The corpus is automatically filtered to only include documents used in the train split to prevent data leakage.
+GRAFT uses HuggingFace `datasets` to automatically download `mteb/hotpotqa` (~5.2M documents). The full corpus is used for retrieval evaluation. Graph edges are built from document co-occurrence in the train split.
 
 ### 1. Prepare data
 ```bash
@@ -80,11 +80,18 @@ Configure index type in `index.type`:
 - **`hnsw`** (default): Fast approximate search (~99% recall, recommended for <1M docs)
   - **CPU-only** index, embeddings still GPU-accelerated
   - Params: `hnsw_m`, `hnsw_ef_construction`, `hnsw_ef_search`
+  - Set `quantize: true` to use SQ8 (4x smaller, <1% recall loss)
 - **`flat`**: Exact search (100% recall, slower)
   - Supports multi-GPU
 - **`ivf`**: Inverted file index for very large corpora (1M+ docs)
   - Supports multi-GPU
   - Params: `ivf_nlist`, `ivf_nprobe`
+
+**Quantization** (`index.quantize: true`):
+- Reduces FAISS index size by ~4x (17 GB → 4 GB for 5M docs)
+- Uses Scalar Quantization (SQ8): 8-bit encoding
+- Minimal impact: <1% recall loss
+- Recommended for large corpora (>1M docs)
 
 ## Losses
 

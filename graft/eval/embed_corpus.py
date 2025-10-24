@@ -85,9 +85,12 @@ def embed_corpus(encoder_path, config, output_path):
 
     all_embeddings = torch.cat(embeddings, dim=0).numpy()
 
+    # Convert to float16 to save space (15 GB → 7.5 GB for 5M docs)
+    all_embeddings = all_embeddings.astype(np.float16)
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     np.save(output_path, all_embeddings)
-    logger.info(f"Saved embeddings: {all_embeddings.shape}")
+    logger.info(f"Saved embeddings: {all_embeddings.shape} (float16)")
 
 
 if __name__ == "__main__":
