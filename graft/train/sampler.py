@@ -1,7 +1,8 @@
 """GraphSAGE neighbor sampler for batched query-doc pairs with k-hop subgraphs."""
 
 import torch
-from torch_sparse import SparseTensor
+from torch_geometric.loader import NeighborLoader
+from torch_geometric.data import Data
 
 
 class GraphBatchSampler:
@@ -16,21 +17,18 @@ class GraphBatchSampler:
         self.rank = rank
         self.world_size = world_size
 
-        # Build SparseTensor adjacency once (GPU-optimized)
-        self.adj_t = SparseTensor.from_edge_index(
-            graph.edge_index, sparse_sizes=(len(graph.node_text), len(graph.node_text))
-        ).t()
-
-        # Move to GPU for fastest sampling
-        if torch.cuda.is_available():
-            self.adj_t = self.adj_t.to("cuda")
+        # Create PyG Data object
+        self.data = Data(
+            edge_index=graph.edge_index,
+            num_nodes=len(graph.node_text),
+        )
 
     def __len__(self):
         total_batches = len(self.train_pairs) // self.batch_size
         return total_batches // self.world_size
 
     def _sample_neighbors(self, seed_nodes):
-        """Ultra-fast GPU neighbor sampling using torch_sparse C++ kernels.
+        """Fast neighbor sampling with optimized NeighborLoader.
 
         Returns:
             subset: All sampled node IDs
@@ -38,21 +36,22 @@ class GraphBatchSampler:
         """
         seed_tensor = torch.tensor(seed_nodes, dtype=torch.long).unique()
 
-        # Move to GPU if adjacency is on GPU
-        if self.adj_t.device() != torch.device("cpu"):
-            seed_tensor = seed_tensor.to(self.adj_t.device())
-
-        # Call the optimized sampler (multi-hop, fanouts per layer)
-        subset, edge_index, _, _ = torch.ops.torch_sparse.neighbor_sample(
-            self.adj_t.storage.rowptr(),
-            self.adj_t.storage.col(),
-            seed_tensor,
-            self.fanouts,
-            False,  # replace
-            True,  # directed
+        # Use NeighborLoader with optimized settings
+        loader = NeighborLoader(
+            self.data,
+            num_neighbors=self.fanouts,
+            input_nodes=seed_tensor,
+            batch_size=len(seed_tensor),
+            shuffle=False,
+            num_workers=4,  # Parallel workers to reduce CPU bottleneck
+            pin_memory=True,  # Faster GPU transfer
+            persistent_workers=True,  # Keep workers alive
         )
 
-        return subset, edge_index
+        # Get the sampled subgraph
+        sampled_data = next(iter(loader))
+
+        return sampled_data.n_id, sampled_data.edge_index
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
