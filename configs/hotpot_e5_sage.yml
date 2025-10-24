@@ -55,6 +55,6 @@ eval:
 
 index:
   use_gpu: true
-  use_fp16: true
+  use_fp16: false
   gpu_search_batch_size: 8
   topk: 50
