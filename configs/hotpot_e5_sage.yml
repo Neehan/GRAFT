@@ -21,7 +21,7 @@ encoder:
   freeze_layers: 0
 
 graph:
-  fanouts: [5, 1] # Neighborhood sampling for graph-aware training
+  fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
 
 loss:
   tau: 0.1

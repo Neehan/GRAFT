@@ -1,7 +1,8 @@
 """GraphSAGE neighbor sampler for batched query-doc pairs with k-hop subgraphs."""
 
 import torch
-from torch_geometric.utils import k_hop_subgraph
+from torch_geometric.loader import NeighborLoader
+from torch_geometric.data import Data
 
 
 class GraphBatchSampler:
@@ -12,12 +13,43 @@ class GraphBatchSampler:
         self.train_pairs = train_pairs
         self.batch_size = query_batch_size
         self.num_hops = len(fanouts)
+        self.fanouts = fanouts
         self.rank = rank
         self.world_size = world_size
+
+        # Create PyG Data object for NeighborLoader
+        self.data = Data(
+            edge_index=graph.edge_index,
+            num_nodes=len(graph.node_text),
+        )
 
     def __len__(self):
         total_batches = len(self.train_pairs) // self.batch_size
         return total_batches // self.world_size
+
+    def _sample_neighbors(self, seed_nodes):
+        """Use PyG's optimized NeighborLoader for sampling.
+
+        Returns:
+            subset: All sampled node IDs
+            edge_index: Edges in the subgraph (relabeled)
+        """
+        seed_tensor = torch.tensor(seed_nodes, dtype=torch.long).unique()
+
+        # Use NeighborLoader for efficient multi-hop sampling
+        loader = NeighborLoader(
+            self.data,
+            num_neighbors=self.fanouts,
+            input_nodes=seed_tensor,
+            batch_size=len(seed_tensor),
+            shuffle=False,
+            num_workers=0,
+        )
+
+        # Get the sampled subgraph (only one batch since we pass all seeds)
+        sampled_data = next(iter(loader))
+
+        return sampled_data.n_id, sampled_data.edge_index
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
@@ -46,14 +78,9 @@ class GraphBatchSampler:
             all_pos_nodes = []
             for nodes in pos_nodes_list:
                 all_pos_nodes.extend(nodes)
-            all_pos_nodes_tensor = torch.tensor(all_pos_nodes, dtype=torch.long)
 
-            subset, edge_index, mapping, edge_mask = k_hop_subgraph(
-                all_pos_nodes_tensor,
-                self.num_hops,
-                self.graph.edge_index,
-                relabel_nodes=True,
-            )
+            # Use proper neighbor sampling with fanouts
+            subset, edge_index = self._sample_neighbors(all_pos_nodes)
 
             num_nodes = len(subset)
             num_pos_edges = edge_index.size(1)
