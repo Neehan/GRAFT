@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16  # More CPUs for faster FAISS index building
 #SBATCH --gres=gpu:l40s:4
-#SBATCH --mem=64GB
+#SBATCH --mem=128GB  # Needed for embedding 5.2M corpus
 #SBATCH -t 48:00:00
 
 module load miniforge/24.3.0-0

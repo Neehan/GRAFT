@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:l40s:4
-#SBATCH --mem=128GB  # Increased for 5.2M corpus in RAM during index building
+#SBATCH --mem=256GB  # Required for 5.2M corpus with chunking (~10-15M nodes)
 #SBATCH -t 24:00:00
 
 module load miniforge/24.3.0-0
