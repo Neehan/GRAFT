@@ -48,7 +48,8 @@ class GraphBatchSampler:
             self.adj_t.storage.col(),
             seed_tensor,
             self.fanouts,
-            replace=False,
+            False,  # replace
+            True,  # directed
         )
 
         return subset, edge_index
