@@ -191,7 +191,8 @@ class BM25Retriever(BaseRetriever):
 
     def search(self, queries, k):
         import numpy as np
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import os
+        from concurrent.futures import ThreadPoolExecutor
 
         is_single = isinstance(queries, str)
         if is_single:
@@ -200,9 +201,13 @@ class BM25Retriever(BaseRetriever):
         def search_single(query):
             tokenized_query = query.lower().split()
             scores = self.bm25.get_scores(tokenized_query)
-            return np.argpartition(scores, -k)[-k:][::-1][np.argsort(scores[np.argpartition(scores, -k)[-k:]])[::-1]].tolist()
+            top_k_indices = np.argpartition(scores, -k)[-k:]
+            top_k_scores = scores[top_k_indices]
+            sorted_indices = top_k_indices[np.argsort(top_k_scores)[::-1]]
+            return sorted_indices.tolist()
 
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        max_workers = os.cpu_count()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(executor.map(search_single, queries))
 
         return results[0] if is_single else results
