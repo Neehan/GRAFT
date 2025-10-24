@@ -11,6 +11,26 @@ from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
 logger = logging.getLogger(__name__)
 
 
+def encode_texts(texts, encoder, config, device):
+    """Encode list of texts to embeddings."""
+    embeddings = []
+    batch_size = config["encoder"]["eval_batch_size"]
+    use_amp = config["train"]["bf16"]
+
+    with torch.no_grad():
+        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+            batch = texts[i : i + batch_size]
+            unwrapped = encoder.module if hasattr(encoder, "module") else encoder
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    batch_embeds = unwrapped.encode(batch, device)
+            else:
+                batch_embeds = unwrapped.encode(batch, device)
+            embeddings.append(batch_embeds.cpu())
+
+    return torch.cat(embeddings, dim=0).numpy()
+
+
 def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None):
     """Embed corpus with encoder.
 
@@ -53,44 +73,7 @@ def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None)
 
         logger.info(f"Loading graph from {graph_path}")
         graph = torch.load(str(graph_path), weights_only=False)
-        corpus_texts = graph.node_text
-
-        embeddings = []
-
-        batch_size = config["encoder"]["eval_batch_size"]
-        num_gpus = torch.cuda.device_count()
-        if num_gpus > 1:
-            logger.info(
-                f"Batch size: {batch_size} total (split across {num_gpus} GPUs = ~{batch_size // num_gpus} per GPU)"
-            )
-        else:
-            logger.info(f"Batch size: {batch_size}")
-
-        use_amp = config["train"]["bf16"]
-        if use_amp:
-            logger.info("Using mixed precision (bfloat16)")
-
-        with torch.no_grad():
-            for i in tqdm(
-                range(0, len(corpus_texts), batch_size), desc="Embedding corpus"
-            ):
-                batch = corpus_texts[i : i + batch_size]
-
-                if use_amp:
-                    with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                        if hasattr(encoder, "module"):
-                            batch_embeds = encoder.module.encode(batch, device)
-                        else:
-                            batch_embeds = encoder.encode(batch, device)
-                else:
-                    if hasattr(encoder, "module"):
-                        batch_embeds = encoder.module.encode(batch, device)
-                    else:
-                        batch_embeds = encoder.encode(batch, device)
-
-                embeddings.append(batch_embeds.cpu())
-
-        all_embeddings = torch.cat(embeddings, dim=0).numpy()
+        all_embeddings = encode_texts(graph.node_text, encoder, config, device)
 
     all_embeddings = all_embeddings.astype(np.float16)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

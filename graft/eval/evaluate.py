@@ -9,7 +9,7 @@ from pathlib import Path
 
 from baselines.retrievers import GRAFTRetriever, ZeroShotRetriever, BM25Retriever
 from graft.eval.utils import prepare_queries, evaluate_retrieval
-from graft.eval.embed_corpus import embed_corpus_texts
+from graft.eval.embed_corpus import encode_texts
 from graft.models.encoder import load_trained_encoder
 
 logger = logging.getLogger(__name__)
@@ -19,8 +19,8 @@ def load_embeddings(embeddings_path, sampled_indices):
     """Load embeddings and slice if sampling."""
     if sampled_indices is not None:
         logger.info(f"Loading embeddings and slicing to {len(sampled_indices)} nodes")
-        full_embeddings = np.load(embeddings_path)
-        return full_embeddings[sampled_indices]
+        full_embeddings = np.load(embeddings_path, mmap_mode='r')
+        return full_embeddings[sampled_indices].copy()
     return np.load(embeddings_path)
 
 
@@ -121,7 +121,9 @@ def main():
         else:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             encoder = load_trained_encoder(args.encoder_path, config, device)
-            embeddings = embed_corpus_texts(encoder, sampled_node_texts, config, device)
+            if torch.cuda.device_count() > 1:
+                encoder = torch.nn.DataParallel(encoder)
+            embeddings = encode_texts(sampled_node_texts, encoder, config, device)
         retriever = GRAFTRetriever(args.encoder_path, embeddings, config)
         method_name = "GRAFT"
 
