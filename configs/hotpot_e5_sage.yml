@@ -18,7 +18,7 @@ encoder:
   freeze_layers: 0
   train_batch_size: 128
   dev_batch_size: 128
-  eval_batch_size: 8
+  eval_batch_size: 2048
 
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
@@ -56,5 +56,5 @@ eval:
 index:
   use_gpu: true
   use_fp16: false
-  gpu_search_batch_size: 8
+  gpu_search_batch_size: 2048
   topk: 50
