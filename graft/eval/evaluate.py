@@ -39,7 +39,9 @@ def main():
         "--model-name", type=str, help="HuggingFace model name (for zero-shot)"
     )
     parser.add_argument(
-        "--faiss-index", type=str, help="Path to FAISS index (for GRAFT/zero-shot)"
+        "--embeddings",
+        type=str,
+        help="Path to precomputed corpus embeddings (for GRAFT/zero-shot)",
     )
 
     args = parser.parse_args()
@@ -69,15 +71,15 @@ def main():
     topk = config["index"]["topk"]
 
     if args.method == "graft":
-        if not args.encoder_path or not args.faiss_index:
-            raise ValueError("GRAFT requires --encoder-path and --faiss-index")
-        retriever = GRAFTRetriever(args.encoder_path, args.faiss_index, config)
+        if not args.encoder_path or not args.embeddings:
+            raise ValueError("GRAFT requires --encoder-path and --embeddings")
+        retriever = GRAFTRetriever(args.encoder_path, args.embeddings, config)
         method_name = "GRAFT"
 
     elif args.method == "zero-shot":
-        if not args.model_name or not args.faiss_index:
-            raise ValueError("Zero-shot requires --model-name and --faiss-index")
-        retriever = ZeroShotRetriever(args.model_name, args.faiss_index, config)
+        if not args.model_name or not args.embeddings:
+            raise ValueError("Zero-shot requires --model-name and --embeddings")
+        retriever = ZeroShotRetriever(args.model_name, args.embeddings, config)
         method_name = f"ZeroShot-{args.model_name.split('/')[-1]}"
 
     elif args.method == "bm25":

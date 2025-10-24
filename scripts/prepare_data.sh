@@ -25,7 +25,7 @@ if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     export CUDA_VISIBLE_DEVICES=0,1,2,3
 fi
 
-# Use all available CPUs for FAISS index building (multi-threaded)
+# Use all available CPUs for preprocessing helpers that can leverage OpenMP
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 

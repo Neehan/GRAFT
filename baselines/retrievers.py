@@ -1,11 +1,14 @@
 """Retriever implementations: GRAFT, Zero-shot Dense, BM25."""
 
 import logging
-import torch
-import numpy as np
+from pathlib import Path
+from typing import Literal, Union
+
 import faiss
-from tqdm import tqdm
+import numpy as np
+import torch
 from rank_bm25 import BM25Okapi
+from tqdm import tqdm
 
 from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
 
@@ -29,14 +32,18 @@ class BaseRetriever:
 
 
 class ZeroShotRetriever(BaseRetriever):
-    """Zero-shot retriever: pretrained encoder + FAISS index."""
+    """Zero-shot retriever: pretrained encoder + FAISS index built on the fly."""
 
-    def __init__(self, model_name, index_path, config):
+    def __init__(self, model_name, embeddings_source, config):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         self.num_gpus = torch.cuda.device_count()
         self._load_encoder(model_name)
-        self._load_faiss_index(index_path)
+        use_fp16 = config["index"]["use_fp16"]
+        embeddings = self._load_embeddings(embeddings_source)
+        embeddings = self.normalize_embeddings(embeddings)
+        device_pref = "cuda" if self.device.type == "cuda" else "cpu"
+        self.index = self.build_index(embeddings, use_fp16, device=device_pref)
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
@@ -50,35 +57,66 @@ class ZeroShotRetriever(BaseRetriever):
             self.encoder = encoder
             self._is_parallel = False
 
-    def _load_faiss_index(self, index_path):
-        logger.info(f"Loading FAISS index from {index_path}")
-        index = faiss.read_index(index_path)
+    def _load_embeddings(self, source: Union[str, np.ndarray]) -> np.ndarray:
+        if isinstance(source, np.ndarray):
+            return source
+        if isinstance(source, str):
+            path = Path(source)
+            if not path.exists():
+                raise FileNotFoundError(f"Embeddings not found: {path}")
+            logger.info(f"Loading embeddings from {path}")
+            return np.load(path)
+        raise TypeError(
+            f"Unsupported embeddings source type: {type(source)} (expected str or np.ndarray)"
+        )
 
-        # Check if index supports GPU (HNSW and some others are CPU-only)
-        index_class_name = index.__class__.__name__
-        cpu_only_types = ["IndexHNSWFlat", "IndexHNSW", "IndexPQ", "IndexLSH"]
-        supports_gpu = index_class_name not in cpu_only_types
+    @staticmethod
+    def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+        """Convert embeddings to contiguous float32 and L2-normalize."""
+        if embeddings.dtype != np.float32:
+            logger.info("Converting embeddings to float32 for FAISS")
+            embeddings = embeddings.astype(np.float32)
 
-        if self.device.type == "cuda" and supports_gpu:
-            if self.num_gpus > 1:
-                logger.info(f"Sharding FAISS index across {self.num_gpus} GPUs")
-                co = faiss.GpuMultipleClonerOptions()
-                co.shard = True
-                co.useFloat16 = True
-                self.index = faiss.index_cpu_to_all_gpus(index, co=co)
-                logger.info(
-                    f"FAISS index sharded across {self.num_gpus} GPUs with FP16"
-                )
-            else:
-                res = faiss.StandardGpuResources()
-                self.index = faiss.index_cpu_to_gpu(res, 0, index)
-                logger.info("FAISS index on GPU 0")
-        else:
-            self.index = index
-            if self.device.type == "cuda" and not supports_gpu:
-                logger.info(
-                    f"Index type {index_class_name} does not support GPU, keeping on CPU (embeddings still GPU-accelerated)"
-                )
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / norms
+        return np.ascontiguousarray(embeddings, dtype=np.float32)
+
+    @staticmethod
+    def build_index(
+        embeddings: np.ndarray, use_fp16: bool, *, device: Literal["cuda", "cpu"] = "cuda"
+    ) -> faiss.Index:
+        """Construct a sharded IndexFlatIP across all visible GPUs."""
+        dim = embeddings.shape[1]
+        base_index = faiss.IndexFlatIP(dim)
+
+        if device != "cuda":
+            logger.info("Building CPU IndexFlatIP")
+            base_index.add(embeddings)
+            return base_index
+
+        if not hasattr(faiss, "get_num_gpus") or not hasattr(
+            faiss, "index_cpu_to_all_gpus"
+        ):
+            raise RuntimeError(
+                "FAISS GPU support is required for IndexFlatIP but is not available in this build"
+            )
+
+        num_gpus = faiss.get_num_gpus()
+        if num_gpus == 0:
+            logger.info("No GPUs visible to FAISS; falling back to CPU index")
+            base_index.add(embeddings)
+            return base_index
+
+        clone_opts = faiss.GpuMultipleClonerOptions()
+        clone_opts.useFloat16 = use_fp16
+        clone_opts.shard = True
+
+        logger.info(f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})")
+        gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
+
+        logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
+        gpu_index.add(embeddings)
+        return gpu_index
 
     def search(self, queries, k):
         is_single = isinstance(queries, str)

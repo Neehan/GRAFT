@@ -48,7 +48,7 @@ scripts/run_eval_graft.sh \
   dev
 ```
 
-This runs the full GRAFT eval pipeline: embeds corpus with trained encoder, builds FAISS index, computes Recall@K/MRR metrics. Use `dev` split during development, `test` for final evaluation.
+This runs the full GRAFT eval pipeline: embeds the corpus with the trained encoder, constructs an in-memory FAISS index, and computes Recall@K/MRR metrics. Use `dev` split during development, `test` for final evaluation.
 
 ### 4. Run baselines (for final paper results)
 ```bash
@@ -76,13 +76,12 @@ See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config sch
 
 ### FAISS Index
 
-We always materialize an exact `IndexFlatIP` and shard it across every visible GPU.
+We materialize an exact `IndexFlatIP` in memory (sharded across all visible GPUs) every time we run retrieval.
 
-- `index.use_fp16` (bool): store vectors in fp16 on GPU before syncing back to CPU.
+- `index.use_fp16` (bool): store vectors in fp16 on GPU while the index lives there.
 - `index.topk`: retrieval fan-out used during evaluation.
 
-All legacy `hnsw` / `ivf` knobs were removed to keep the research surface small. If you need approximate search,
-fork from an earlier revision or reintroduce FAISS' ANN builders as needed.
+No on-disk FAISS artifacts are created; if you need persistent ANN indexes fork an earlier revision or extend the utilities in `baselines/retrievers.py`.
 
 ## Losses
 

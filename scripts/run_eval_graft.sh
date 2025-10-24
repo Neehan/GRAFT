@@ -4,7 +4,7 @@
 #SBATCH --job-name=graft_eval
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16  # More CPUs for faster FAISS index building
+#SBATCH --cpus-per-task=16  # Helps with preprocessing and evaluation overhead
 #SBATCH --gres=gpu:l40s:4
 #SBATCH --mem=128GB  # Needed for embedding 5.2M corpus
 #SBATCH -t 48:00:00
@@ -25,7 +25,7 @@ if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     export CUDA_VISIBLE_DEVICES=0,1,2,3
 fi
 
-# Use all available CPUs for FAISS index building
+# Use all available CPUs for preprocessing helpers that can leverage OpenMP
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 
@@ -51,12 +51,12 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
-INDEX_PATH="$OUTPUT_DIR/index.faiss"
+EMBEDDINGS_PATH="$OUTPUT_DIR/corpus_embeddings.npy"
 RESULTS_PATH="$OUTPUT_DIR/results.json"
 
-# Step 1: Embed corpus and build FAISS index directly (saves disk space)
-echo "Step 1/2: Embedding corpus and building FAISS index..."
-python -m graft.eval.embed_corpus "$ENCODER_PATH" "$CONFIG_PATH" "dummy" --index-path "$INDEX_PATH"
+# Step 1: Embed corpus (dense vectors reused for on-the-fly FAISS index)
+echo "Step 1/2: Embedding corpus..."
+python -m graft.eval.embed_corpus "$ENCODER_PATH" "$CONFIG_PATH" "$EMBEDDINGS_PATH"
 echo ""
 
 # Step 2: Evaluate
@@ -64,7 +64,7 @@ echo "Step 2/2: Evaluating GRAFT..."
 python -m graft.eval.evaluate \
     --method graft \
     --encoder-path "$ENCODER_PATH" \
-    --faiss-index "$INDEX_PATH" \
+    --embeddings "$EMBEDDINGS_PATH" \
     --config "$CONFIG_PATH" \
     --output "$RESULTS_PATH" \
     --split "$SPLIT"
@@ -73,4 +73,3 @@ echo ""
 echo "=== Evaluation complete! ==="
 echo "Results: $RESULTS_PATH"
 cat "$RESULTS_PATH"
-

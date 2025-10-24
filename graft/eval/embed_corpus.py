@@ -7,19 +7,17 @@ from pathlib import Path
 from tqdm import tqdm
 
 from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
-from graft.eval.build_faiss import build_faiss_index_from_embeddings
 
 logger = logging.getLogger(__name__)
 
 
-def embed_corpus(encoder_path, config, output_path, index_path=None, cached_embeddings_path=None):
+def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None):
     """Embed corpus with encoder.
 
     Args:
         encoder_path: Path to trained checkpoint (.pt) OR HuggingFace model name
         config: Config dict
         output_path: Path to save embeddings .npy file
-        index_path: Path to save FAISS index directly (optional)
         cached_embeddings_path: Path to cached embeddings to reuse (optional, for zero-shot)
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -92,17 +90,10 @@ def embed_corpus(encoder_path, config, output_path, index_path=None, cached_embe
 
         all_embeddings = torch.cat(embeddings, dim=0).numpy()
 
-    if index_path:
-        logger.info(f"Building FAISS index directly (skipping embeddings save)")
-        build_faiss_index_from_embeddings(all_embeddings, config, index_path)
-        logger.info(
-            f"Embeddings shape: {all_embeddings.shape}, Index saved to: {index_path}"
-        )
-    else:
-        all_embeddings = all_embeddings.astype(np.float16)
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        np.save(output_path, all_embeddings)
-        logger.info(f"Saved embeddings: {all_embeddings.shape} (float16)")
+    all_embeddings = all_embeddings.astype(np.float16)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    np.save(output_path, all_embeddings)
+    logger.info(f"Saved embeddings: {all_embeddings.shape} (float16)")
 
 
 if __name__ == "__main__":
@@ -117,12 +108,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "output",
         type=str,
-        help="Path to save embeddings .npy (or dummy if --index-path)",
-    )
-    parser.add_argument(
-        "--index-path",
-        type=str,
-        help="Build FAISS index directly (skips saving embeddings)",
+        help="Path to save embeddings .npy",
     )
     parser.add_argument(
         "--cached-embeddings",
@@ -143,6 +129,5 @@ if __name__ == "__main__":
         args.encoder_path,
         config,
         args.output,
-        index_path=args.index_path,
         cached_embeddings_path=args.cached_embeddings,
     )

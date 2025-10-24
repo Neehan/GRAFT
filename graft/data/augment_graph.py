@@ -1,12 +1,13 @@
 """Augment graph with kNN edges based on embedding similarity."""
 
 import logging
-import torch
-import numpy as np
-import faiss
 from pathlib import Path
+
+import numpy as np
+import torch
 from tqdm import tqdm
 
+from baselines.retrievers import ZeroShotRetriever
 from graft.models.encoder import Encoder
 
 logger = logging.getLogger(__name__)
@@ -138,33 +139,15 @@ def build_knn_edges(embeddings, k, config):
     Returns:
         List of (src, dst) tuples
     """
-    num_nodes, dim = embeddings.shape
+    num_nodes, _ = embeddings.shape
 
-    logger.info(f"Converting embeddings to float32...")
-    embeddings = embeddings.astype(np.float32)
-    embeddings = np.ascontiguousarray(embeddings)
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    logger.info("Normalizing embeddings for FAISS")
+    embeddings = ZeroShotRetriever.normalize_embeddings(embeddings)
 
     logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
     use_fp16 = config["index"]["use_fp16"]
-
-    if not hasattr(faiss, "get_num_gpus") or not hasattr(faiss, "index_cpu_to_all_gpus"):
-        raise RuntimeError("FAISS GPU support is required for IndexFlatIP but is not available in this build")
-
-    num_gpus = faiss.get_num_gpus()
-    if num_gpus == 0:
-        raise RuntimeError("IndexFlatIP requires CUDA GPUs but none are visible to FAISS")
-
-    base_index = faiss.IndexFlatIP(dim)
-    co = faiss.GpuMultipleClonerOptions()
-    co.useFloat16 = use_fp16
-    co.shard = True
-
-    logger.info(f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})")
-    index = faiss.index_cpu_to_all_gpus(base_index, co)
-
-    logger.info(f"Adding {num_nodes:,} vectors on GPU")
-    index.add(embeddings)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    index = ZeroShotRetriever.build_index(embeddings, use_fp16, device=device)
 
     logger.info("Flat index built")
 

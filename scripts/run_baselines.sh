@@ -4,7 +4,7 @@
 #SBATCH --job-name=graft_baselines
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16  # More CPUs for faster FAISS index building
+#SBATCH --cpus-per-task=16  # Helps with preprocessing and evaluation overhead
 #SBATCH --gres=gpu:l40s:4
 #SBATCH --mem=128GB  # Needed for embedding 5.2M corpus
 #SBATCH -t 48:00:00
@@ -25,7 +25,7 @@ if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     export CUDA_VISIBLE_DEVICES=0,1,2,3
 fi
 
-# Use all available CPUs for FAISS index building
+# Use all available CPUs for preprocessing helpers that can leverage OpenMP
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 
@@ -44,9 +44,8 @@ echo ""
 mkdir -p "$OUTPUT_DIR"
 
 # 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
+# 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
 echo "=== 1/2: Running Zero-shot E5 ==="
-
-ZERO_SHOT_INDEX="$OUTPUT_DIR/zero_shot_index.faiss"
 
 # Check for cached embeddings from graph augmentation (reuse to avoid re-encoding 5M docs)
 GRAPH_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['data']['graph_dir'])")
@@ -55,28 +54,20 @@ CACHED_EMBEDDINGS="$GRAPH_DIR/${GRAPH_NAME}_embeddings_intfloat_e5-base-v2.npy"
 
 if [ -f "$CACHED_EMBEDDINGS" ]; then
     echo "  Found cached embeddings: $CACHED_EMBEDDINGS"
-    echo "  Step 1/2: Building FAISS index from cached embeddings (skipping re-encoding)..."
-    python -m graft.eval.embed_corpus \
-        intfloat/e5-base-v2 \
-        "$CONFIG_PATH" \
-        "dummy" \
-        --index-path "$ZERO_SHOT_INDEX" \
-        --cached-embeddings "$CACHED_EMBEDDINGS"
 else
     echo "  No cached embeddings found, encoding corpus..."
-    echo "  Step 1/2: Embedding corpus and building FAISS index..."
+    echo "  Step 1/2: Embedding corpus..."
     python -m graft.eval.embed_corpus \
         intfloat/e5-base-v2 \
         "$CONFIG_PATH" \
-        "dummy" \
-        --index-path "$ZERO_SHOT_INDEX"
+        "$CACHED_EMBEDDINGS"
 fi
 
 echo "  Step 2/2: Evaluating zero-shot E5..."
 python -m graft.eval.evaluate \
     --method zero-shot \
     --model-name intfloat/e5-base-v2 \
-    --faiss-index "$ZERO_SHOT_INDEX" \
+    --embeddings "$CACHED_EMBEDDINGS" \
     --config "$CONFIG_PATH" \
     --output "$OUTPUT_DIR/zero_shot_e5_results.json" \
     --split "$SPLIT"
@@ -96,11 +87,10 @@ echo ""
 # CONTRIEVER_EMBEDDINGS="$OUTPUT_DIR/contriever_embeddings.npy"
 # CONTRIEVER_INDEX="$OUTPUT_DIR/contriever_index.faiss"
 # python -m graft.eval.embed_corpus facebook/contriever "$CONFIG_PATH" "$CONTRIEVER_EMBEDDINGS"
-# python -m graft.eval.build_faiss "$CONTRIEVER_EMBEDDINGS" "$CONFIG_PATH" "$CONTRIEVER_INDEX"
 # python -m graft.eval.evaluate \
 #     --method zero-shot \
 #     --model-name facebook/contriever \
-#     --faiss-index "$CONTRIEVER_INDEX" \
+#     --embeddings "$CONTRIEVER_EMBEDDINGS" \
 #     --config "$CONFIG_PATH" \
 #     --output "$OUTPUT_DIR/zero_shot_contriever_results.json" \
 #     --split "$SPLIT"
