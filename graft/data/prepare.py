@@ -22,24 +22,27 @@ def prepare_hotpot_data(config, split="train"):
     graph_name = config["data"]["graph_name"]
     base_graph_path = output_dir / f"{graph_name}.pt"
 
-    logger.info("Loading mteb/hotpotqa corpus...")
-    corpus = load_dataset("mteb/hotpotqa", "corpus", split="corpus")
+    if base_graph_path.exists():
+        logger.info(f"Base graph already exists at {base_graph_path}, skipping build")
+    else:
+        logger.info("Loading mteb/hotpotqa corpus...")
+        corpus = load_dataset("mteb/hotpotqa", "corpus", split="corpus")
 
-    # Load train qrels for building graph edges (co-occurrence)
-    qrels_train = load_dataset("mteb/hotpotqa", "default", split="train")
+        # Load train qrels for building graph edges (co-occurrence)
+        qrels_train = load_dataset("mteb/hotpotqa", "default", split="train")
 
-    logger.info(f"Using full corpus: {len(corpus)} documents")
+        logger.info(f"Using full corpus: {len(corpus)} documents")
 
-    chunk_size = config["data"]["chunk_size"]
-    chunk_overlap = config["data"]["chunk_overlap"]
+        chunk_size = config["data"]["chunk_size"]
+        chunk_overlap = config["data"]["chunk_overlap"]
 
-    logger.info(
-        f"Building base graph with chunk_size={chunk_size}, overlap={chunk_overlap}..."
-    )
-    build_hotpot_graph(
-        corpus, qrels_train, str(base_graph_path), chunk_size, chunk_overlap
-    )
-    logger.info(f"Base graph created: {base_graph_path}")
+        logger.info(
+            f"Building base graph with chunk_size={chunk_size}, overlap={chunk_overlap}..."
+        )
+        build_hotpot_graph(
+            corpus, qrels_train, str(base_graph_path), chunk_size, chunk_overlap
+        )
+        logger.info(f"Base graph created: {base_graph_path}")
 
     # Step 2: Augment with kNN if configured
     semantic_k = config["data"].get("semantic_k")
@@ -57,7 +60,7 @@ def prepare_hotpot_data(config, split="train"):
             config,
             semantic_k,
             knn_only,
-            force_recompute=True,
+            force_recompute=False,
         )
         logger.info(f"Augmented graph created: {augmented_path}")
         final_graph_path = augmented_path

@@ -172,15 +172,19 @@ def build_knn_edges(embeddings, k, config):
                 f"Building HNSW+SQ8 index: {num_nodes} nodes, M={m}, efC={ef_construction}, efS={ef_search}"
             )
             index = faiss.index_factory(dim, f"HNSW{m},SQ8")
+            index.hnsw.efConstruction = ef_construction
+            logger.info("Training SQ8 quantizer...")
+            index.train(embeddings)
+            index.add(embeddings)
+            index.hnsw.efSearch = ef_search
         else:
             logger.info(
                 f"Building HNSW index: {num_nodes} nodes, M={m}, efC={ef_construction}, efS={ef_search}"
             )
             index = faiss.IndexHNSWFlat(dim, m)
-
-        index.hnsw.efConstruction = ef_construction
-        index.add(embeddings)
-        index.hnsw.efSearch = ef_search
+            index.hnsw.efConstruction = ef_construction
+            index.add(embeddings)
+            index.hnsw.efSearch = ef_search
         logger.info("HNSW index built")
     elif index_type == "flat":
         logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
