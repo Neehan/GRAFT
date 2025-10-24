@@ -40,7 +40,9 @@ def build_faiss_index_from_embeddings(embeddings, config, output_path):
         index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
 
         if train_sample_size is not None and train_sample_size < n:
-            logger.info(f"Training IVF on {train_sample_size:,} sampled vectors (out of {n:,})")
+            logger.info(
+                f"Training IVF on {train_sample_size:,} sampled vectors (out of {n:,})"
+            )
             train_indices = np.random.choice(n, train_sample_size, replace=False)
             index.train(embeddings[train_indices])
         else:
@@ -72,6 +74,18 @@ def build_faiss_index_from_embeddings(embeddings, config, output_path):
             index = faiss.IndexHNSWFlat(d, m, faiss.METRIC_INNER_PRODUCT)
 
         index.hnsw.efConstruction = ef_construction
+
+        if quantize and not index.is_trained:
+            train_sample_size = config["index"]["sq8_train_sample_size"]
+            if train_sample_size is not None and train_sample_size < n:
+                logger.info(
+                    f"Training SQ8 quantizer on {train_sample_size:,} sampled vectors (out of {n:,})"
+                )
+                train_indices = np.random.choice(n, train_sample_size, replace=False)
+                index.train(embeddings[train_indices])
+            else:
+                logger.info(f"Training SQ8 quantizer on all {n:,} vectors")
+                index.train(embeddings)
 
         logger.info(f"Adding {n:,} vectors in batches of {add_batch_size:,}")
         for i in tqdm(range(0, n, add_batch_size), desc="Adding to HNSW index"):
