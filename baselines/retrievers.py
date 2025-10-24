@@ -128,21 +128,13 @@ class ZeroShotRetriever(BaseRetriever):
         clone_opts.shard = True
 
         logger.info(
-            f"Adding {embeddings.shape[0]:,} vectors on all {num_gpus} GPUs (sharded, fp16={use_fp16})"
+            f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})"
         )
         gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
+
+        logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
         gpu_index.add(embeddings)
-
-        logger.info(
-            "Copying sharded index back to CPU for efficient large-batch search with OpenMP"
-        )
-        cpu_index = faiss.index_gpu_to_cpu(gpu_index)
-
-        n_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
-        faiss.omp_set_num_threads(n_threads)
-        logger.info(f"FAISS CPU search will use {n_threads} OpenMP threads")
-
-        return cpu_index
+        return gpu_index
 
     def search(self, queries, k):
         is_single = isinstance(queries, str)
