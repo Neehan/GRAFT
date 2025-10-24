@@ -8,7 +8,7 @@ data:
   graph_name: page_graph
   chunk_size: 220
   chunk_overlap: 40
-  batch_size: 2048 # Total batch size for inference/embedding (will be split across available GPUs with DataParallel)
+  batch_size: 512 # Total batch size for inference/embedding (will be split across available GPUs with DataParallel)
   eval_batch_size: 2048 # Total batch size for evaluation queries (DataParallel splits encoding across GPUs)
   semantic_k: 3 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
   knn_only: true # If true, use only semantic edges (ablation)
