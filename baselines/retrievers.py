@@ -9,7 +9,7 @@ import os
 
 import numpy as np
 import torch
-from rank_bm25 import BM25Okapi
+import bm25s
 from tqdm import tqdm
 
 from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
@@ -176,38 +176,22 @@ class GRAFTRetriever(ZeroShotRetriever):
 
 
 class BM25Retriever(BaseRetriever):
-    """BM25 sparse retriever."""
+    """BM25 sparse retriever (bm25s backend)."""
 
     def __init__(self, corpus_texts):
         logger.info("Building BM25 index...")
-
-        def simple_tokenize(text):
-            return text.lower().split()
-
-        tokenized_corpus = [
-            simple_tokenize(text) for text in tqdm(corpus_texts, desc="Tokenizing")
-        ]
-        self.bm25 = BM25Okapi(tokenized_corpus)
+        corpus_tokens = bm25s.tokenize(corpus_texts, stopwords="en", show_progress=True)
+        self.retriever = bm25s.BM25()
+        self.retriever.index(corpus_tokens, show_progress=True)
+        logger.info("BM25 index built")
 
     def search(self, queries, k):
-        import numpy as np
-        import os
-        from concurrent.futures import ThreadPoolExecutor
-
         is_single = isinstance(queries, str)
         if is_single:
             queries = [queries]
 
-        def search_single(query):
-            tokenized_query = query.lower().split()
-            scores = self.bm25.get_scores(tokenized_query)
-            top_k_indices = np.argpartition(scores, -k)[-k:]
-            top_k_scores = scores[top_k_indices]
-            sorted_indices = top_k_indices[np.argsort(top_k_scores)[::-1]]
-            return sorted_indices.tolist()
-
-        max_workers = os.cpu_count()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(search_single, queries))
+        query_tokens = bm25s.tokenize(queries, stopwords="en")
+        results, scores = self.retriever.retrieve(query_tokens, k=k)
+        results = results.tolist()
 
         return results[0] if is_single else results

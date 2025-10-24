@@ -17,7 +17,7 @@ setup(
         "wandb>=0.15.0",
         "colorama",
         "matplotlib",
-        "rank-bm25>=0.2.2",
+        "bm25s>=0.1.0",
     ],
     extras_require={
         "dev": ["pytest>=7.3.0", "black>=23.3.0", "isort>=5.12.0"],
