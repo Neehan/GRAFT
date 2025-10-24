@@ -74,24 +74,15 @@ scripts/         # Shell scripts for train/eval/prep/augment
 
 See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config schema (encoder, graph, loss weights, training params).
 
-### FAISS Index Types
+### FAISS Index
 
-Configure index type in `index.type`:
-- **`hnsw`** (default): Fast approximate search (~99% recall, recommended for <1M docs)
-  - **CPU-only** index, embeddings still GPU-accelerated
-  - Params: `hnsw_m`, `hnsw_ef_construction`, `hnsw_ef_search`
-  - Set `quantize: true` to use SQ8 (4x smaller, <1% recall loss)
-- **`flat`**: Exact search (100% recall, slower)
-  - Supports multi-GPU
-- **`ivf`**: Inverted file index for very large corpora (1M+ docs)
-  - Supports multi-GPU
-  - Params: `ivf_nlist`, `ivf_nprobe`
+We always materialize an exact `IndexFlatIP` and shard it across every visible GPU.
 
-**Quantization** (`index.quantize: true`):
-- Reduces FAISS index size by ~4x (17 GB → 4 GB for 5M docs)
-- Uses Scalar Quantization (SQ8): 8-bit encoding
-- Minimal impact: <1% recall loss
-- Recommended for large corpora (>1M docs)
+- `index.use_fp16` (bool): store vectors in fp16 on GPU before syncing back to CPU.
+- `index.topk`: retrieval fan-out used during evaluation.
+
+All legacy `hnsw` / `ivf` knobs were removed to keep the research surface small. If you need approximate search,
+fork from an earlier revision or reintroduce FAISS' ANN builders as needed.
 
 ## Losses
 

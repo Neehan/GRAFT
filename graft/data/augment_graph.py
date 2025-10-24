@@ -145,85 +145,28 @@ def build_knn_edges(embeddings, k, config):
     embeddings = np.ascontiguousarray(embeddings)
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
-    omp_threads = config["index"]["omp_threads"]
-    faiss.omp_set_num_threads(omp_threads)
-    logger.info(f"FAISS using {omp_threads} OpenMP threads")
+    logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
+    use_fp16 = config["index"]["use_fp16"]
 
-    index_type = config["index"]["type"]
+    if not hasattr(faiss, "get_num_gpus") or not hasattr(faiss, "index_cpu_to_all_gpus"):
+        raise RuntimeError("FAISS GPU support is required for IndexFlatIP but is not available in this build")
 
-    if index_type == "ivf":
-        nlist = config["index"]["ivf_nlist"]
-        nprobe = config["index"]["ivf_nprobe"]
-        m = config["index"]["hnsw_m"]
-        train_sample_size = config["index"]["ivf_train_sample_size"]
-        add_batch_size = config["index"]["add_batch_size"]
+    num_gpus = faiss.get_num_gpus()
+    if num_gpus == 0:
+        raise RuntimeError("IndexFlatIP requires CUDA GPUs but none are visible to FAISS")
 
-        logger.info(
-            f"Building IVF index: {num_nodes} nodes, nlist={nlist}, nprobe={nprobe}, M={m}"
-        )
-        quantizer = faiss.IndexHNSWFlat(dim, m)
-        index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+    base_index = faiss.IndexFlatIP(dim)
+    co = faiss.GpuMultipleClonerOptions()
+    co.useFloat16 = use_fp16
+    co.shard = True
 
-        if train_sample_size is not None and train_sample_size < num_nodes:
-            logger.info(f"Training IVF on {train_sample_size:,} sampled vectors (out of {num_nodes:,})")
-            train_indices = np.random.choice(num_nodes, train_sample_size, replace=False)
-            index.train(embeddings[train_indices])
-        else:
-            logger.info(f"Training IVF on all {num_nodes:,} vectors")
-            index.train(embeddings)
+    logger.info(f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})")
+    index = faiss.index_cpu_to_all_gpus(base_index, co)
 
-        logger.info(f"Adding {num_nodes:,} vectors in batches of {add_batch_size:,}")
-        for i in tqdm(range(0, num_nodes, add_batch_size), desc="Adding to IVF index"):
-            batch_end = min(i + add_batch_size, num_nodes)
-            index.add(embeddings[i:batch_end])
+    logger.info(f"Adding {num_nodes:,} vectors on GPU")
+    index.add(embeddings)
 
-        index.nprobe = nprobe
-        logger.info("IVF index built")
-    elif index_type == "hnsw":
-        m = config["index"]["hnsw_m"]
-        ef_construction = config["index"]["hnsw_ef_construction"]
-        ef_search = config["index"]["hnsw_ef_search"]
-        quantize = config["index"]["quantize"]
-        add_batch_size = config["index"]["add_batch_size"]
-
-        if quantize:
-            logger.info(
-                f"Building HNSW+SQ8 index: {num_nodes} nodes, M={m}, efC={ef_construction}, efS={ef_search}"
-            )
-            index = faiss.index_factory(dim, f"HNSW{m},SQ8")
-            index.hnsw.efConstruction = ef_construction
-            logger.info("Training SQ8 quantizer...")
-            index.train(embeddings)
-
-            logger.info(f"Adding {num_nodes:,} vectors in batches of {add_batch_size:,}")
-            for i in tqdm(range(0, num_nodes, add_batch_size), desc="Adding to HNSW+SQ8 index"):
-                batch_end = min(i + add_batch_size, num_nodes)
-                index.add(embeddings[i:batch_end])
-
-            index.hnsw.efSearch = ef_search
-        else:
-            logger.info(
-                f"Building HNSW index: {num_nodes} nodes, M={m}, efC={ef_construction}, efS={ef_search}"
-            )
-            index = faiss.IndexHNSWFlat(dim, m)
-            index.hnsw.efConstruction = ef_construction
-
-            logger.info(f"Adding {num_nodes:,} vectors in batches of {add_batch_size:,}")
-            for i in tqdm(range(0, num_nodes, add_batch_size), desc="Adding to HNSW index"):
-                batch_end = min(i + add_batch_size, num_nodes)
-                index.add(embeddings[i:batch_end])
-
-            index.hnsw.efSearch = ef_search
-        logger.info("HNSW index built")
-    elif index_type == "flat":
-        logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
-        index = faiss.IndexFlatIP(dim)
-        index.add(embeddings)
-        logger.info("Flat index built")
-    else:
-        raise ValueError(
-            f"Unknown index type: {index_type}. Use 'flat', 'hnsw', or 'ivf'"
-        )
+    logger.info("Flat index built")
 
     batch_size = config["data"]["batch_size"]
     logger.info(f"Starting kNN search: k={k}, batch_size={batch_size}...")
