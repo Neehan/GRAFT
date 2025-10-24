@@ -51,20 +51,13 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
-EMBEDDINGS_PATH="$OUTPUT_DIR/corpus_embeddings.npy"
 RESULTS_PATH="$OUTPUT_DIR/results.json"
 
-# Step 1: Embed corpus (dense vectors reused for on-the-fly FAISS index)
-echo "Step 1/2: Embedding corpus..."
-python -m graft.eval.embed_corpus "$ENCODER_PATH" "$CONFIG_PATH" "$EMBEDDINGS_PATH"
-echo ""
-
-# Step 2: Evaluate
-echo "Step 2/2: Evaluating GRAFT..."
+# Evaluate (encodes corpus on-the-fly, respects eval.corpus_size for sampling)
+echo "Evaluating GRAFT (encoding corpus on-the-fly)..."
 python -m graft.eval.evaluate \
     --method graft \
     --encoder-path "$ENCODER_PATH" \
-    --embeddings "$EMBEDDINGS_PATH" \
     --config "$CONFIG_PATH" \
     --output "$RESULTS_PATH" \
     --split "$SPLIT"

@@ -39,23 +39,23 @@ This loads `mteb/hotpotqa`, filters the corpus to train split documents only, bu
 bash scripts/run_train.sh configs/hotpot_e5_sage.yml
 ```
 
-### 3. Evaluate GRAFT (embed + build index + compute metrics)
+### 3. Evaluate GRAFT
 ```bash
-scripts/run_eval_graft.sh \
+bash scripts/run_eval_graft.sh \
   outputs/graft_hotpot_e5_sage/encoder_best.pt \
   configs/hotpot_e5_sage.yml \
   outputs/graft_hotpot_e5_sage \
   dev
 ```
 
-This runs the full GRAFT eval pipeline: embeds the corpus with the trained encoder, constructs an in-memory FAISS index, and computes Recall@K/MRR metrics. Use `dev` split during development, `test` for final evaluation.
+Encodes corpus, builds FAISS, computes metrics. Set `eval.corpus_size: 500000` in config to sample instead of full 5.2M corpus (7min vs 1hr).
 
-### 4. Run baselines (for final paper results)
+### 4. Run baselines
 ```bash
-scripts/run_baselines.sh configs/hotpot_e5_sage.yml outputs/baselines_test test
+bash scripts/run_baselines.sh configs/hotpot_e5_sage.yml outputs/baselines_test test
 ```
 
-This runs all baselines on the test split (BM25, Zero-shot E5) and saves results. **Run this ONCE** for final paper evaluation.
+Runs BM25 and Zero-shot E5. Zero-shot embeddings cached. Respects `eval.corpus_size`.
 
 ## Structure
 
@@ -76,12 +76,7 @@ See [configs/hotpot_e5_sage.yml](configs/hotpot_e5_sage.yml) for full config sch
 
 ### FAISS Index
 
-We materialize an exact `IndexFlatIP` in memory (sharded across all visible GPUs) every time we run retrieval.
-
-- `index.use_fp16` (bool): store vectors in fp16 on GPU while the index lives there.
-- `index.topk`: retrieval fan-out used during evaluation.
-
-No on-disk FAISS artifacts are created; if you need persistent ANN indexes fork an earlier revision or extend the utilities in `baselines/retrievers.py`.
+`IndexFlatIP` built on GPU, copied to CPU for search. In-memory, not persisted.
 
 ## Losses
 

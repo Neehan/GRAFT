@@ -52,7 +52,7 @@ def main():
     parser.add_argument(
         "--embeddings",
         type=str,
-        help="Path to precomputed corpus embeddings (for GRAFT/zero-shot)",
+        help="Path to precomputed corpus embeddings (for zero-shot only)",
     )
 
     args = parser.parse_args()
@@ -116,14 +116,13 @@ def main():
     topk = config["index"]["topk"]
 
     if args.method == "graft":
-        if args.embeddings:
-            embeddings = load_embeddings(args.embeddings, sampled_indices)
-        else:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            encoder = load_trained_encoder(args.encoder_path, config, device)
-            if torch.cuda.device_count() > 1:
-                encoder = torch.nn.DataParallel(encoder)
-            embeddings = encode_texts(sampled_node_texts, encoder, config, device)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        encoder = load_trained_encoder(args.encoder_path, config, device)
+        if torch.cuda.device_count() > 1:
+            logger.info(f"Using {torch.cuda.device_count()} GPUs for encoding")
+            encoder = torch.nn.DataParallel(encoder)
+        logger.info(f"Encoding {len(sampled_node_texts)} corpus texts...")
+        embeddings = encode_texts(sampled_node_texts, encoder, config, device)
         retriever = GRAFTRetriever(args.encoder_path, embeddings, config)
         method_name = "GRAFT"
 

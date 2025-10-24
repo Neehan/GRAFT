@@ -190,14 +190,19 @@ class BM25Retriever(BaseRetriever):
         self.bm25 = BM25Okapi(tokenized_corpus)
 
     def search(self, queries, k):
+        import numpy as np
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         is_single = isinstance(queries, str)
         if is_single:
             queries = [queries]
 
-        results = []
-        for query in queries:
+        def search_single(query):
             tokenized_query = query.lower().split()
             scores = self.bm25.get_scores(tokenized_query)
-            results.append(scores.argsort()[-k:][::-1].tolist())
+            return np.argpartition(scores, -k)[-k:][::-1][np.argsort(scores[np.argpartition(scores, -k)[-k:]])[::-1]].tolist()
+
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(executor.map(search_single, queries))
 
         return results[0] if is_single else results
