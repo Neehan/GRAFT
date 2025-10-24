@@ -17,7 +17,7 @@ encoder:
   pool: cls
   freeze_layers: 0
   train_batch_size: 128
-  eval_batch_size: 256
+  eval_batch_size: 8
 
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
@@ -54,7 +54,7 @@ eval:
   confuser_fraction: 0.1
 
 index:
-  use_gpu: false
-  use_fp16: false
-  gpu_search_batch_size: 32
+  use_gpu: true
+  use_fp16: true
+  gpu_search_batch_size: 8
   topk: 50

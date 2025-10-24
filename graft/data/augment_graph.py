@@ -48,7 +48,7 @@ def embed_graph_nodes(graph, config, device=None):
     embeddings = []
 
     # Batch size is total across all GPUs (DataParallel will split it automatically)
-    batch_size = config["encoder"]["train_batch_size"]
+    batch_size = config["encoder"]["eval_batch_size"]
     num_gpus = torch.cuda.device_count()
     if num_gpus > 1:
         logger.info(

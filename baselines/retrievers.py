@@ -99,12 +99,15 @@ class ZeroShotRetriever(BaseRetriever):
         dim = embeddings.shape[1]
         base_index = faiss.IndexFlatIP(dim)
 
-        if device != "cuda" or not index_config["use_gpu"]:
+        use_gpu = bool(index_config["use_gpu"])
+        use_fp16 = bool(index_config["use_fp16"])
+        logger.info("FAISS index config: use_gpu=%s, use_fp16=%s", use_gpu, use_fp16)
+
+        if device != "cuda" or not use_gpu:
             logger.info("Building CPU IndexFlatIP")
             base_index.add(embeddings)
             return base_index
 
-        use_fp16 = bool(index_config["use_fp16"])
         if not hasattr(faiss, "get_num_gpus") or not hasattr(
             faiss, "index_cpu_to_all_gpus"
         ):
