@@ -148,12 +148,6 @@ class ZeroShotRetriever(BaseRetriever):
                 query_embeds, axis=1, keepdims=True
             )
             query_embeds = np.ascontiguousarray(query_embeds, dtype=np.float32)
-
-            logger.info(
-                "FAISS search over %d queries using %d-query chunks",
-                query_embeds.shape[0],
-                self.search_batch_size,
-            )
             indices_batches = []
             for start in range(0, query_embeds.shape[0], self.search_batch_size):
                 end = min(start + self.search_batch_size, query_embeds.shape[0])
