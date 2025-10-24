@@ -121,14 +121,11 @@ class ZeroShotRetriever(BaseRetriever):
             base_index.add(embeddings)
             return base_index
 
-        clone_opts = faiss.GpuMultipleClonerOptions()
-        clone_opts.useFloat16 = use_fp16
-        clone_opts.shard = True
-
         logger.info(
-            f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})"
+            f"Moving flat index to GPU 0 (fp16={use_fp16}, {num_gpus} GPUs available)"
         )
-        gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
+        res = faiss.StandardGpuResources()
+        gpu_index = faiss.index_cpu_to_gpu(res, 0, base_index)
 
         logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
         gpu_index.add(embeddings)
