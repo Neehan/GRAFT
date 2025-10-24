@@ -56,12 +56,12 @@ index:
   type: hnsw # Index type: "flat", "hnsw", or "ivf"
   quantize: true # Use SQ8 quantization to save space (~4x smaller, <1% recall loss)
   hnsw_m: 32
-  hnsw_ef_construction: 40
-  hnsw_ef_search: 32
+  hnsw_ef_construction: 100
+  hnsw_ef_search: 64
   ivf_nlist: 4096
   ivf_nprobe: 32
   ivf_train_sample_size: 1048576 # Sample size for IVF training (null = use all embeddings)
-  sq8_train_sample_size: null # Sample size for SQ8 training (null = use all embeddings)
-  add_batch_size: 50000 # Batch size for adding embeddings to index
-  omp_threads: 32 # OpenMP threads for FAISS (tune for 256-core system)
+  sq8_train_sample_size: 1048576 # Sample size for SQ8 training (null = use all embeddings)
+  add_batch_size: 100000 # Batch size for adding embeddings to index
+  omp_threads: 16 # OpenMP threads for FAISS (tune for 256-core system)
   topk: 50
