@@ -48,12 +48,29 @@ echo "=== 1/2: Running Zero-shot E5 ==="
 
 ZERO_SHOT_INDEX="$OUTPUT_DIR/zero_shot_index.faiss"
 
-echo "  Step 1/2: Embedding corpus and building FAISS index..."
-python -m graft.eval.embed_corpus \
-    intfloat/e5-base-v2 \
-    "$CONFIG_PATH" \
-    "dummy" \
-    --index-path "$ZERO_SHOT_INDEX"
+# Check for cached embeddings from graph augmentation (reuse to avoid re-encoding 5M docs)
+GRAPH_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['data']['graph_dir'])")
+GRAPH_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['data']['graph_name'])")
+CACHED_EMBEDDINGS="$GRAPH_DIR/${GRAPH_NAME}_embeddings_intfloat_e5-base-v2.npy"
+
+if [ -f "$CACHED_EMBEDDINGS" ]; then
+    echo "  Found cached embeddings: $CACHED_EMBEDDINGS"
+    echo "  Step 1/2: Building FAISS index from cached embeddings (skipping re-encoding)..."
+    python -m graft.eval.embed_corpus \
+        intfloat/e5-base-v2 \
+        "$CONFIG_PATH" \
+        "dummy" \
+        --index-path "$ZERO_SHOT_INDEX" \
+        --cached-embeddings "$CACHED_EMBEDDINGS"
+else
+    echo "  No cached embeddings found, encoding corpus..."
+    echo "  Step 1/2: Embedding corpus and building FAISS index..."
+    python -m graft.eval.embed_corpus \
+        intfloat/e5-base-v2 \
+        "$CONFIG_PATH" \
+        "dummy" \
+        --index-path "$ZERO_SHOT_INDEX"
+fi
 
 echo "  Step 2/2: Evaluating zero-shot E5..."
 python -m graft.eval.evaluate \

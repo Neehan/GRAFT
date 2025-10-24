@@ -4,20 +4,25 @@ import logging
 import faiss
 import numpy as np
 from pathlib import Path
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
 
 def build_faiss_index_from_embeddings(embeddings, config, output_path):
     """Build FAISS index from embeddings array."""
-    # Convert to float32 if needed (FAISS requires float32)
     if embeddings.dtype == np.float16:
         logger.info("Converting float16 embeddings to float32 for FAISS")
         embeddings = embeddings.astype(np.float32)
 
     d = embeddings.shape[1]
+    n = embeddings.shape[0]
 
     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
+    omp_threads = config["index"]["omp_threads"]
+    faiss.omp_set_num_threads(omp_threads)
+    logger.info(f"FAISS using {omp_threads} OpenMP threads")
 
     index_type = config["index"]["type"]
 
@@ -25,20 +30,35 @@ def build_faiss_index_from_embeddings(embeddings, config, output_path):
         nlist = config["index"]["ivf_nlist"]
         nprobe = config["index"]["ivf_nprobe"]
         m = config["index"]["hnsw_m"]
+        train_sample_size = config["index"]["ivf_train_sample_size"]
+        add_batch_size = config["index"]["add_batch_size"]
 
         logger.info(
-            f"Building IVF index with HNSW quantizer: nlist={nlist}, nprobe={nprobe}"
+            f"Building IVF index with HNSW quantizer: nlist={nlist}, nprobe={nprobe}, M={m}"
         )
         quantizer = faiss.IndexHNSWFlat(d, m)
         index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
-        index.train(embeddings)
-        index.add(embeddings)
+
+        if train_sample_size is not None and train_sample_size < n:
+            logger.info(f"Training IVF on {train_sample_size:,} sampled vectors (out of {n:,})")
+            train_indices = np.random.choice(n, train_sample_size, replace=False)
+            index.train(embeddings[train_indices])
+        else:
+            logger.info(f"Training IVF on all {n:,} vectors")
+            index.train(embeddings)
+
+        logger.info(f"Adding {n:,} vectors in batches of {add_batch_size:,}")
+        for i in tqdm(range(0, n, add_batch_size), desc="Adding to IVF index"):
+            batch_end = min(i + add_batch_size, n)
+            index.add(embeddings[i:batch_end])
+
         index.nprobe = nprobe
     elif index_type == "hnsw":
         m = config["index"]["hnsw_m"]
         ef_construction = config["index"]["hnsw_ef_construction"]
         ef_search = config["index"]["hnsw_ef_search"]
-        quantize = config["index"].get("quantize", False)
+        quantize = config["index"]["quantize"]
+        add_batch_size = config["index"]["add_batch_size"]
 
         if quantize:
             logger.info(
@@ -52,7 +72,12 @@ def build_faiss_index_from_embeddings(embeddings, config, output_path):
             index = faiss.IndexHNSWFlat(d, m, faiss.METRIC_INNER_PRODUCT)
 
         index.hnsw.efConstruction = ef_construction
-        index.add(embeddings)
+
+        logger.info(f"Adding {n:,} vectors in batches of {add_batch_size:,}")
+        for i in tqdm(range(0, n, add_batch_size), desc="Adding to HNSW index"):
+            batch_end = min(i + add_batch_size, n)
+            index.add(embeddings[i:batch_end])
+
         index.hnsw.efSearch = ef_search
     elif index_type == "flat":
         logger.info("Building Flat index")
