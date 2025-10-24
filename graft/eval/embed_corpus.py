@@ -53,12 +53,15 @@ def embed_corpus(encoder_path, config, output_path, index_path=None):
 
     embeddings = []
 
-    # Scale batch size by number of GPUs
-    base_batch_size = config["data"]["batch_size"]
-    batch_size = base_batch_size * max(1, torch.cuda.device_count())
-    logger.info(
-        f"Batch size: {batch_size} (base={base_batch_size}, GPUs={torch.cuda.device_count()})"
-    )
+    # Batch size is total across all GPUs (DataParallel will split it automatically)
+    batch_size = config["data"]["batch_size"]
+    num_gpus = torch.cuda.device_count()
+    if num_gpus > 1:
+        logger.info(
+            f"Batch size: {batch_size} total (split across {num_gpus} GPUs = ~{batch_size // num_gpus} per GPU)"
+        )
+    else:
+        logger.info(f"Batch size: {batch_size}")
 
     # Enable mixed precision for faster inference
     use_amp = config["train"]["bf16"]

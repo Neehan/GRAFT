@@ -92,14 +92,16 @@ def main():
     num_gpus = torch.cuda.device_count()
     eval_batch_size = config["data"].get("eval_batch_size", 32)
 
-    if num_gpus > 1 and args.method != "bm25":
-        eval_batch_size = eval_batch_size * num_gpus
+    # Batch size is total for queries (DataParallel splits encoding across GPUs automatically)
+    if args.method == "bm25":
+        eval_batch_size = 1
+        logger.info(f"BM25 evaluation, batch_size={eval_batch_size}")
+    elif num_gpus > 1:
         logger.info(
-            f"Multi-GPU evaluation: {num_gpus} GPUs, batch_size={eval_batch_size}"
+            f"Multi-GPU evaluation: {num_gpus} GPUs, query batch_size={eval_batch_size} total (~{eval_batch_size // num_gpus} per GPU for encoding)"
         )
     else:
         logger.info(f"Single device evaluation, batch_size={eval_batch_size}")
-        eval_batch_size = 1 if args.method == "bm25" else eval_batch_size
 
     evaluate_retrieval(
         queries,
