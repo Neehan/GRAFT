@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Union
 
 import faiss
 import numpy as np
@@ -39,21 +39,17 @@ class ZeroShotRetriever(BaseRetriever):
         self.config = config
         self.num_gpus = torch.cuda.device_count()
         self.index_config = config["index"]
-        raw_chunk = self.index_config["gpu_search_batch_size"]
-        self.search_batch_size: Optional[int]
-        if raw_chunk:
-            self.search_batch_size = int(raw_chunk)
-        else:
-            self.search_batch_size = None
+        self.search_batch_size = int(self.index_config["gpu_search_batch_size"])
+        if self.search_batch_size <= 0:
+            raise ValueError(
+                f"index.gpu_search_batch_size must be positive: {self.search_batch_size}"
+            )
         self._load_encoder(model_name)
         embeddings = self._load_embeddings(embeddings_source)
         embeddings = self.normalize_embeddings(embeddings)
         device_pref = "cuda" if self.device.type == "cuda" else "cpu"
         self.index = self.build_index(embeddings, self.index_config, device=device_pref)
-        if self.search_batch_size:
-            logger.info(f"FAISS query chunk size set to {self.search_batch_size}")
-        else:
-            logger.info("FAISS query chunking disabled")
+        logger.info(f"FAISS query chunk size set to {self.search_batch_size}")
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
@@ -70,15 +66,16 @@ class ZeroShotRetriever(BaseRetriever):
     def _load_embeddings(self, source: Union[str, np.ndarray]) -> np.ndarray:
         if isinstance(source, np.ndarray):
             return source
-        if isinstance(source, str):
+        elif isinstance(source, str):
             path = Path(source)
             if not path.exists():
                 raise FileNotFoundError(f"Embeddings not found: {path}")
             logger.info(f"Loading embeddings from {path}")
             return np.load(path)
-        raise TypeError(
-            f"Unsupported embeddings source type: {type(source)} (expected str or np.ndarray)"
-        )
+        else:
+            raise TypeError(
+                f"Unsupported embeddings source type: {type(source)} (expected str or np.ndarray)"
+            )
 
     @staticmethod
     def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
@@ -125,15 +122,20 @@ class ZeroShotRetriever(BaseRetriever):
         clone_opts.useFloat16 = use_fp16
         clone_opts.shard = True
 
-        logger.info(f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})")
+        logger.info(
+            f"Moving flat index to all {num_gpus} visible GPUs (fp16={use_fp16})"
+        )
         gpu_index = faiss.index_cpu_to_all_gpus(base_index, clone_opts)
 
-        tile_size = index_config["gpu_tile_size"]
-        if tile_size:
-            param_space = faiss.GpuParameterSpace()
-            param_space.initialize(gpu_index)
-            param_space.set_index_parameter(gpu_index, "tileSize", tile_size)
-            logger.info(f"Configured FAISS GPU tileSize={tile_size}")
+        try:
+            tile_size = int(index_config["gpu_tile_size"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("index.gpu_tile_size must be an integer value") from exc
+
+        param_space = faiss.GpuParameterSpace()
+        param_space.initialize(gpu_index)
+        param_space.set_index_parameter(gpu_index, "tileSize", tile_size)
+        logger.info(f"Configured FAISS GPU tileSize={tile_size}")
 
         logger.info(f"Adding {embeddings.shape[0]:,} vectors on GPU")
         gpu_index.add(embeddings)
@@ -152,23 +154,17 @@ class ZeroShotRetriever(BaseRetriever):
             )
             query_embeds = np.ascontiguousarray(query_embeds, dtype=np.float32)
 
-            if (
-                self.search_batch_size
-                and query_embeds.shape[0] > self.search_batch_size
-            ):
-                logger.info(
-                    "FAISS search over %d queries using %d-query chunks",
-                    query_embeds.shape[0],
-                    self.search_batch_size,
-                )
-                indices_batches = []
-                for start in range(0, query_embeds.shape[0], self.search_batch_size):
-                    end = min(start + self.search_batch_size, query_embeds.shape[0])
-                    _, idx = self.index.search(query_embeds[start:end], k)
-                    indices_batches.append(idx)
-                indices = np.vstack(indices_batches)
-            else:
-                _, indices = self.index.search(query_embeds, k)
+            logger.info(
+                "FAISS search over %d queries using %d-query chunks",
+                query_embeds.shape[0],
+                self.search_batch_size,
+            )
+            indices_batches = []
+            for start in range(0, query_embeds.shape[0], self.search_batch_size):
+                end = min(start + self.search_batch_size, query_embeds.shape[0])
+                _, idx = self.index.search(query_embeds[start:end], k)
+                indices_batches.append(idx)
+            indices = np.vstack(indices_batches)
 
         results = [idx.tolist() for idx in indices]
         return results[0] if is_single else results

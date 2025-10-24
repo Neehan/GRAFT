@@ -57,7 +57,7 @@ def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None)
 
         embeddings = []
 
-        batch_size = config["data"]["batch_size"]
+        batch_size = config["encoder"]["eval_batch_size"]
         num_gpus = torch.cuda.device_count()
         if num_gpus > 1:
             logger.info(
@@ -71,7 +71,9 @@ def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None)
             logger.info("Using mixed precision (bfloat16)")
 
         with torch.no_grad():
-            for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
+            for i in tqdm(
+                range(0, len(corpus_texts), batch_size), desc="Embedding corpus"
+            ):
                 batch = corpus_texts[i : i + batch_size]
 
                 if use_amp:

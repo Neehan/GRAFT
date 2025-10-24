@@ -48,7 +48,7 @@ def embed_graph_nodes(graph, config, device=None):
     embeddings = []
 
     # Batch size is total across all GPUs (DataParallel will split it automatically)
-    batch_size = config["data"]["batch_size"]
+    batch_size = config["encoder"]["train_batch_size"]
     num_gpus = torch.cuda.device_count()
     if num_gpus > 1:
         logger.info(
@@ -146,13 +146,11 @@ def build_knn_edges(embeddings, k, config):
 
     logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    index = ZeroShotRetriever.build_index(
-        embeddings, config["index"], device=device
-    )
+    index = ZeroShotRetriever.build_index(embeddings, config["index"], device=device)
 
     logger.info("Flat index built")
 
-    batch_size = config["data"]["batch_size"]
+    batch_size = config["encoder"]["train_batch_size"]
     logger.info(f"Starting kNN search: k={k}, batch_size={batch_size}...")
     all_indices = []
 

@@ -32,18 +32,18 @@ logger = logging.getLogger("graft.train")
 
 class GRAFTTrainer:
     def __init__(self, config_path):
-        self.cfg_path = config_path
+        self.config_path = config_path
         with open(config_path) as f:
-            self.cfg = yaml.safe_load(f)
+            self.config = yaml.safe_load(f)
 
         # Set seed for reproducibility
-        seed = self.cfg["train"]["seed"]
+        seed = self.config["train"]["seed"]
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         self.accelerator = Accelerator(
-            gradient_accumulation_steps=self.cfg["train"][
+            gradient_accumulation_steps=self.config["train"][
                 "gradient_accumulation_steps"
             ],
             kwargs_handlers=[ddp_kwargs],
@@ -52,9 +52,9 @@ class GRAFTTrainer:
 
         if self.accelerator.is_main_process:
             # Build run name with kNN info
-            base_name = self.cfg["experiment"]["name"]
-            semantic_k = self.cfg["data"].get("semantic_k", 0)
-            knn_only = self.cfg["data"].get("knn_only", False)
+            base_name = self.config["experiment"]["name"]
+            semantic_k = self.config["data"]["semantic_k"]
+            knn_only = self.config["data"]["knn_only"]
 
             if semantic_k is not None:
                 suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
@@ -65,7 +65,7 @@ class GRAFTTrainer:
             wandb.init(
                 project="graft",
                 name=run_name,
-                config=self.cfg,
+                config=self.config,
             )
             wandb.define_metric("global_step")
             wandb.define_metric("*", step_metric="global_step")
@@ -80,10 +80,10 @@ class GRAFTTrainer:
 
     def _get_graph_path(self):
         """Get path to prepared graph."""
-        graph_dir = Path(self.cfg["data"]["graph_dir"])
-        graph_name = self.cfg["data"]["graph_name"]
-        semantic_k = self.cfg["data"].get("semantic_k")
-        knn_only = self.cfg["data"].get("knn_only", False)
+        graph_dir = Path(self.config["data"]["graph_dir"])
+        graph_name = self.config["data"]["graph_name"]
+        semantic_k = self.config["data"]["semantic_k"]
+        knn_only = self.config["data"]["knn_only"]
 
         if semantic_k is None:
             graph_path = graph_dir / f"{graph_name}.pt"
@@ -94,7 +94,7 @@ class GRAFTTrainer:
         if not graph_path.exists():
             raise FileNotFoundError(
                 f"Graph not found: {graph_path}\n"
-                f"Run data preparation first: bash scripts/prepare_data.sh {self.cfg_path}"
+                f"Run data preparation first: bash scripts/prepare_data.sh {self.config_path}"
             )
 
         if self.accelerator.is_main_process:
@@ -103,10 +103,10 @@ class GRAFTTrainer:
 
     def _setup_models(self):
         self.encoder = Encoder(
-            model_name=self.cfg["encoder"]["model_name"],
-            max_len=self.cfg["encoder"]["max_len"],
-            pool=self.cfg["encoder"]["pool"],
-            freeze_layers=self.cfg["encoder"]["freeze_layers"],
+            model_name=self.config["encoder"]["model_name"],
+            max_len=self.config["encoder"]["max_len"],
+            pool=self.config["encoder"]["pool"],
+            freeze_layers=self.config["encoder"]["freeze_layers"],
         )
 
         self.tokenizer = self.encoder.tokenizer
@@ -118,15 +118,15 @@ class GRAFTTrainer:
         self.graph = torch.load(graph_path, weights_only=False)
 
         train_pairs = load_query_pairs(
-            "train", graph_path, self.cfg, log=self.accelerator.is_main_process
+            "train", graph_path, self.config, log=self.accelerator.is_main_process
         )
 
         with self.accelerator.main_process_first():
             self.sampler = GraphBatchSampler(
                 graph=self.graph,
                 train_pairs=train_pairs,
-                query_batch_size=self.cfg["train"]["query_batch_size"],
-                fanouts=self.cfg["graph"]["fanouts"],
+                query_batch_size=self.config["train"]["query_batch_size"],
+                fanouts=self.config["graph"]["fanouts"],
                 rank=self.accelerator.process_index,
                 world_size=self.accelerator.num_processes,
             )
@@ -142,12 +142,12 @@ class GRAFTTrainer:
     def _setup_training(self):
         optimizer = torch.optim.AdamW(
             self.encoder.parameters(),
-            lr=self.cfg["train"]["lr_encoder"],
-            weight_decay=self.cfg["train"]["weight_decay"],
+            lr=self.config["train"]["lr_encoder"],
+            weight_decay=self.config["train"]["weight_decay"],
         )
 
-        total_steps = len(self.sampler) * self.cfg["train"]["epochs"]
-        warmup_steps = int(total_steps * self.cfg["train"]["warmup_ratio"])
+        total_steps = len(self.sampler) * self.config["train"]["epochs"]
+        warmup_steps = int(total_steps * self.config["train"]["warmup_ratio"])
         scheduler = get_cosine_schedule_with_warmup(
             optimizer, warmup_steps, total_steps
         )
@@ -158,8 +158,8 @@ class GRAFTTrainer:
 
     def _setup_hard_neg_miner(self):
         """Initialize hard negative miner (subgraph-level)."""
-        if self.cfg["train"]["hardneg_enabled"]:
-            self.hard_neg_miner = HardNegativeMiner(self.cfg)
+        if self.config["train"]["hardneg_enabled"]:
+            self.hard_neg_miner = HardNegativeMiner(self.config)
             if self.accelerator.is_main_process:
                 logger.info("Hard negative miner enabled")
         else:
@@ -169,7 +169,7 @@ class GRAFTTrainer:
         """Tokenize and encode texts in one forward pass."""
         encoded = self.tokenizer(
             texts,
-            max_length=self.cfg["encoder"]["max_len"],
+            max_length=self.config["encoder"]["max_len"],
             padding=True,
             truncation=True,
             return_tensors="pt",
@@ -181,18 +181,18 @@ class GRAFTTrainer:
     def _load_fixed_dev_set(self):
         """Build small dev corpus for fast realistic evaluation."""
         graph_path = self._get_graph_path()
-        dev_pairs = load_query_pairs("dev", graph_path, self.cfg, log=False)
+        dev_pairs = load_query_pairs("dev", graph_path, self.config, log=False)
 
-        eval_cfg = self.cfg["eval"]
-        eval_seed = eval_cfg.get("seed", self.cfg["train"]["seed"])
-        num_dev_queries = min(len(dev_pairs), eval_cfg["num_samples"])
+        eval_config = self.config["eval"]
+        eval_seed = eval_config["seed"]
+        num_dev_queries = min(len(dev_pairs), eval_config["num_samples"])
 
         dev_set, corpus_indices = build_dev_set(
             graph=self.graph,
             dev_pairs=dev_pairs,
             num_dev_queries=num_dev_queries,
-            dev_corpus_size=eval_cfg["dev_corpus_size"],
-            confuser_fraction=eval_cfg.get("confuser_fraction", 0.1),
+            dev_corpus_size=eval_config["dev_corpus_size"],
+            confuser_fraction=eval_config["confuser_fraction"],
             seed=eval_seed,
             is_main_process=self.accelerator.is_main_process,
             logger=logger,
@@ -270,20 +270,12 @@ class GRAFTTrainer:
             labels=labels,
             node_embeds=node_embeds,
             edge_index=batch["subgraph"].edge_index.to(self.device),
-            pos_edges=(
-                batch.get("pos_edges").to(self.device)
-                if batch.get("pos_edges") is not None
-                else None
-            ),
-            neg_edges=(
-                batch.get("neg_edges").to(self.device)
-                if batch.get("neg_edges") is not None
-                else None
-            ),
+            pos_edges=batch["pos_edges"].to(self.device),
+            neg_edges=batch["neg_edges"].to(self.device),
             labels_mask=labels_mask,
             hard_negs=hard_negs,
             **{
-                k: self.cfg["loss"][k]
+                k: self.config["loss"][k]
                 for k in ["lambda_q2d", "tau", "tau_graph", "alpha_link"]
             },
         )
@@ -295,8 +287,8 @@ class GRAFTTrainer:
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-        recall_k = self.cfg["eval"]["recall_k"]
-        encoder_batch_size = self.cfg["eval"]["encoder_batch_size"]
+        recall_k = self.config["eval"]["recall_k"]
+        encoder_batch_size = self.config["eval"]["encoder_batch_size"]
 
         with torch.no_grad():
             # Encode dev corpus
@@ -338,7 +330,7 @@ class GRAFTTrainer:
     def _save_checkpoint(self, tag):
         """Save model checkpoints."""
         if self.accelerator.is_main_process:
-            output_dir = Path(self.cfg["experiment"]["output_dir"])
+            output_dir = Path(self.config["experiment"]["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
             torch.save(unwrapped_encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
@@ -349,20 +341,21 @@ class GRAFTTrainer:
             logger.info("Running zero-shot evaluation...")
             zero_shot_recall = self._evaluate()
             logger.info(
-                f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+                f"Zero-shot: dev_recall@{self.config['eval']['recall_k']}={zero_shot_recall:.4f}"
             )
             wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
         self.accelerator.wait_for_everyone()
 
-        for epoch in range(self.cfg["train"]["epochs"]):
+        for epoch in range(self.config["train"]["epochs"]):
             self.encoder.train()
 
             total_steps = (
-                len(self.sampler) // self.cfg["train"]["gradient_accumulation_steps"]
+                len(self.sampler) // self.config["train"]["gradient_accumulation_steps"]
             )
             pbar = tqdm(
-                total=total_steps, desc=f"Epoch {epoch+1}/{self.cfg['train']['epochs']}"
+                total=total_steps,
+                desc=f"Epoch {epoch+1}/{self.config['train']['epochs']}",
             )
 
             for batch in self.sampler:
@@ -374,10 +367,10 @@ class GRAFTTrainer:
 
                     self.accelerator.backward(loss)
 
-                    if self.cfg["train"]["grad_clip"] > 0:
+                    if self.config["train"]["grad_clip"] > 0:
                         self.accelerator.clip_grad_norm_(
                             self.encoder.parameters(),
-                            self.cfg["train"]["grad_clip"],
+                            self.config["train"]["grad_clip"],
                         )
 
                     self.optimizer.step()
@@ -389,7 +382,7 @@ class GRAFTTrainer:
 
                     if (
                         self.accelerator.sync_gradients
-                        and self.global_step % self.cfg["train"]["log_every"] == 0
+                        and self.global_step % self.config["train"]["log_every"] == 0
                     ):
                         if self.accelerator.is_main_process:
                             metrics = {
@@ -414,7 +407,7 @@ class GRAFTTrainer:
 
                     if (
                         self.accelerator.sync_gradients
-                        and self.global_step % self.cfg["train"]["eval_every_steps"]
+                        and self.global_step % self.config["train"]["eval_every_steps"]
                         == 0
                     ):
                         if self.accelerator.is_main_process:
@@ -423,7 +416,7 @@ class GRAFTTrainer:
                             )
                             recall = self._evaluate()
                             logger.info(
-                                f"Step {self.global_step}: dev_recall@{self.cfg['eval']['recall_k']}={recall:.4f}"
+                                f"Step {self.global_step}: dev_recall@{self.config['eval']['recall_k']}={recall:.4f}"
                             )
                             wandb.log(
                                 {"global_step": self.global_step, "dev_recall": recall}

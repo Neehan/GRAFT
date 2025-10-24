@@ -78,6 +78,9 @@ class GraphBatchSampler:
 
     def _sample_negative_edges(self, edge_index, num_nodes, num_neg_samples):
         """Sample negative edges (non-existing edges) from subgraph."""
+        if num_neg_samples <= 0:
+            return torch.empty((2, 0), dtype=torch.long)
+
         edge_set = set(zip(edge_index[0].tolist(), edge_index[1].tolist()))
 
         neg_edges = []
@@ -86,6 +89,9 @@ class GraphBatchSampler:
             dst = torch.randint(0, num_nodes, (1,)).item()
             if src != dst and (src, dst) not in edge_set:
                 neg_edges.append((src, dst))
+
+        if not neg_edges:
+            return torch.empty((2, 0), dtype=torch.long)
 
         return torch.tensor(neg_edges, dtype=torch.long).t()
 
@@ -114,12 +120,8 @@ class GraphBatchSampler:
             num_nodes = len(subset)
             num_pos_edges = edge_index.size(1)
 
-            pos_edges = edge_index if num_pos_edges > 0 else None
-            neg_edges = (
-                self._sample_negative_edges(edge_index, num_nodes, num_pos_edges)
-                if num_pos_edges > 0
-                else None
-            )
+            pos_edges = edge_index
+            neg_edges = self._sample_negative_edges(edge_index, num_nodes, num_pos_edges)
 
             subgraph = type(
                 "Subgraph",
