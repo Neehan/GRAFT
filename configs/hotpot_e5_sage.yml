@@ -8,7 +8,7 @@ data:
   graph_name: page_graph
   chunk_size: 220
   chunk_overlap: 40
-  semantic_k: 3 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
+  semantic_k: 15 # kNN augmentation: add k nearest neighbors in embedding space (set to null to disable)
   knn_only: true # If true, use only semantic edges (ablation)
 
 encoder:
