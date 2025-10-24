@@ -4,7 +4,7 @@
 #SBATCH --job-name=graft_baselines
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16  # More CPUs for faster FAISS index building
 #SBATCH --gres=gpu:l40s:4
 #SBATCH --mem=64GB
 #SBATCH -t 48:00:00
@@ -24,6 +24,10 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     export CUDA_VISIBLE_DEVICES=0,1,2,3
 fi
+
+# Use all available CPUs for FAISS index building
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=16
 
 CONFIG_PATH=${1:-configs/hotpot_e5_sage.yml}
 OUTPUT_DIR=${2:-outputs/baselines_test}
