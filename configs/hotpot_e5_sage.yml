@@ -16,8 +16,8 @@ encoder:
   max_len: 256
   pool: cls
   freeze_layers: 0
-  train_batch_size: 512
-  eval_batch_size: 2048
+  train_batch_size: 128
+  eval_batch_size: 256
 
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
