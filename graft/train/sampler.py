@@ -42,8 +42,8 @@ class GraphBatchSampler:
         if self.adj_t.device() != torch.device("cpu"):
             seed_tensor = seed_tensor.to(self.adj_t.device())
 
-        # Use torch_sparse.neighbor_sample - pure C++/CUDA, zero Python overhead
-        subset, edge_index = torch.ops.torch_sparse.neighbor_sample(
+        # Call the optimized sampler (multi-hop, fanouts per layer)
+        subset, edge_index, _, _ = torch.ops.torch_sparse.neighbor_sample(
             self.adj_t.storage.rowptr(),
             self.adj_t.storage.col(),
             seed_tensor,
