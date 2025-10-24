@@ -95,8 +95,10 @@ Configure index type in `index.type`:
 
 ## Losses
 
-- **InfoNCE (q→d)**: Query-to-document supervised retrieval
+- **InfoNCE (q→d)**: Query-to-document retrieval with hard negative mining (subgraph-level, per-batch)
 - **Neighbor contrast**: Graph smoothness over edges
 - **Link prediction** (optional): Edge prediction regularizer
 
 Combined as: `L = λ L_q2d + (1-λ) L_nbr + α L_link`
+
+Hard negatives mined from current batch subgraph via similarity ranking (no FAISS overhead).

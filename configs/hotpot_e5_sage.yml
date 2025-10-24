@@ -41,6 +41,9 @@ train:
   seed: 42
   log_every: 20
   eval_every_steps: 100
+  # Hard negative mining (subgraph-level)
+  hardneg_enabled: true
+  hardneg_per_query: 32
 
 eval:
   num_samples: 500

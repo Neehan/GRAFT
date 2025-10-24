@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 from graft.models.encoder import Encoder
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
+from graft.train.hard_neg_miner import HardNegativeMiner
 from graft.data.pair_maker import load_query_pairs
 
 logger = logging.getLogger("graft.train")
@@ -71,6 +72,7 @@ class GRAFTTrainer:
         self._setup_models()
         self._setup_data()
         self._setup_training()
+        self._setup_hard_neg_miner()
 
         self.global_step: int = 0
         self.best_recall: float = 0.0
@@ -153,6 +155,15 @@ class GRAFTTrainer:
             self.encoder, optimizer, scheduler
         )
 
+    def _setup_hard_neg_miner(self):
+        """Initialize hard negative miner (subgraph-level)."""
+        if self.cfg["train"]["hardneg_enabled"]:
+            self.hard_neg_miner = HardNegativeMiner(self.cfg)
+            if self.accelerator.is_main_process:
+                logger.info("Hard negative miner enabled")
+        else:
+            self.hard_neg_miner = None
+
     def _encode_texts(self, texts):
         """Tokenize and encode texts in one forward pass."""
         encoded = self.tokenizer(
@@ -226,11 +237,11 @@ class GRAFTTrainer:
             all_embeds, [num_queries, len(node_texts)], dim=0
         )
 
-        # Labels: Use all positives with soft-OR InfoNCE (sum in numerator, not average)
-        # batch["pos_nodes"] is a list of lists: [[pos1_1, pos1_2], [pos2_1], ...]
+        # Labels: Use all positives with soft-OR InfoNCE + masking (no repetition)
         subgraph_ids = batch["subgraph"].n_id.to(self.device)
 
         labels_list = []
+        mask_list = []
         max_positives = max(len(pos_nodes) for pos_nodes in batch["pos_nodes"])
 
         for pos_nodes in batch["pos_nodes"]:
@@ -241,15 +252,31 @@ class GRAFTTrainer:
             if len(pos_indices) == 0:
                 raise ValueError("No positives found for query in subgraph")
 
-            # Pad to max_positives by repeating (for batching) - do in one operation
-            if len(pos_indices) < max_positives:
-                # Calculate how many times to repeat, then slice
-                repeats = (max_positives + len(pos_indices) - 1) // len(pos_indices)
-                pos_indices = pos_indices.repeat(repeats)[:max_positives]
+            # Pad with zeros and use mask (no repetition)
+            padded = torch.zeros(max_positives, dtype=torch.long, device=self.device)
+            mask = torch.zeros(max_positives, dtype=torch.bool, device=self.device)
+            padded[: len(pos_indices)] = pos_indices
+            mask[: len(pos_indices)] = True
 
-            labels_list.append(pos_indices)
+            labels_list.append(padded)
+            mask_list.append(mask)
 
-        labels = torch.stack(labels_list, dim=0)  # (B, K)
+        labels = torch.stack(labels_list, dim=0)
+        labels_mask = torch.stack(mask_list, dim=0)
+
+        # Mine hard negatives from subgraph
+        hard_negs = None
+        if self.hard_neg_miner is not None:
+            # Convert pos_nodes (global IDs) to subgraph indices
+            pos_indices_list = []
+            for pos_nodes in batch["pos_nodes"]:
+                pos_tensor = torch.tensor(pos_nodes, device=self.device, dtype=torch.long)
+                matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(dim=0)
+                pos_indices_list.append(matches.nonzero(as_tuple=False).squeeze(-1).tolist())
+
+            hard_negs = self.hard_neg_miner.mine_hard_negatives(
+                query_embeds, node_embeds, pos_indices_list
+            )
 
         # Loss
         loss, loss_q2d, loss_nbr = compute_total_loss(
@@ -268,6 +295,8 @@ class GRAFTTrainer:
                 if batch.get("neg_edges") is not None
                 else None
             ),
+            labels_mask=labels_mask,
+            hard_negs=hard_negs,
             **{
                 k: self.cfg["loss"][k]
                 for k in ["lambda_q2d", "tau", "tau_graph", "alpha_link"]
@@ -343,13 +372,13 @@ class GRAFTTrainer:
 
     def train(self):
         """Main training loop."""
-        # if self.accelerator.is_main_process:
-        #     logger.info("Running zero-shot evaluation...")
-        #     zero_shot_recall = self._evaluate()
-        #     logger.info(
-        #         f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
-        #     )
-        #     wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
+        if self.accelerator.is_main_process:
+            logger.info("Running zero-shot evaluation...")
+            zero_shot_recall = self._evaluate()
+            logger.info(
+                f"Zero-shot: dev_recall@{self.cfg['eval']['recall_k']}={zero_shot_recall:.4f}"
+            )
+            wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
         self.accelerator.wait_for_everyone()
 
