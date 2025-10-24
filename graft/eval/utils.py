@@ -56,7 +56,7 @@ def prepare_queries(split, doc_id_to_id):
 
 
 def evaluate_retrieval(
-    queries, retrieval_fn, topk, method_name, output_path, batch_size=1
+    queries, retrieval_fn, topk, method_name, output_path, eval_config, batch_size=1
 ):
     """Generic evaluation loop for any retrieval method.
 
@@ -66,18 +66,22 @@ def evaluate_retrieval(
         topk: Number of docs to retrieve
         method_name: Name for logging
         output_path: Path to save results JSON
+        eval_config: Config dict with eval settings (recall_k, joint_recall_k, ndcg_k, mrr_k)
         batch_size: Number of queries to process at once (for multi-GPU optimization)
 
     Returns:
         Results dict with metrics
     """
-    all_scores = {
-        "joint_recall@10": [],
-        "recall@5": [],
-        "recall@10": [],
-        "ndcg@10": [],
-        "mrr@10": [],
-    }
+    recall_k_values = eval_config["recall_k"]
+    joint_recall_k = eval_config["joint_recall_k"]
+    ndcg_k = eval_config["ndcg_k"]
+    mrr_k = eval_config["mrr_k"]
+
+    all_scores = {f"joint_recall@{joint_recall_k}": []}
+    for k in recall_k_values:
+        all_scores[f"recall@{k}"] = []
+    all_scores[f"ndcg@{ndcg_k}"] = []
+    all_scores[f"mrr@{mrr_k}"] = []
 
     for i in tqdm(range(0, len(queries), batch_size), desc=f"Evaluating {method_name}"):
         batch_queries = queries[i : i + batch_size]
@@ -87,12 +91,16 @@ def evaluate_retrieval(
 
         for q, retrieved in zip(batch_queries, retrieved_batch):
             gold_ids = q["gold_ids"]
-            all_scores["joint_recall@10"].append(
-                compute_joint_recall_at_k(retrieved, gold_ids, 10)
+            all_scores[f"joint_recall@{joint_recall_k}"].append(
+                compute_joint_recall_at_k(retrieved, gold_ids, joint_recall_k)
             )
-            all_scores["recall@5"].append(compute_recall_at_k(retrieved, gold_ids, 5))
-            all_scores["recall@10"].append(compute_recall_at_k(retrieved, gold_ids, 10))
-            all_scores["ndcg@10"].append(compute_ndcg_at_k(retrieved, gold_ids, 10))
-            all_scores["mrr@10"].append(compute_mrr(retrieved, gold_ids, 10))
+            for k in recall_k_values:
+                all_scores[f"recall@{k}"].append(
+                    compute_recall_at_k(retrieved, gold_ids, k)
+                )
+            all_scores[f"ndcg@{ndcg_k}"].append(
+                compute_ndcg_at_k(retrieved, gold_ids, ndcg_k)
+            )
+            all_scores[f"mrr@{mrr_k}"].append(compute_mrr(retrieved, gold_ids, mrr_k))
 
     return aggregate_and_save_results(all_scores, output_path, method_name)

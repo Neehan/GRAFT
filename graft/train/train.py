@@ -183,17 +183,17 @@ class GRAFTTrainer:
         graph_path = self._get_graph_path()
         dev_pairs = load_query_pairs("dev", graph_path, self.config, log=False)
 
-        eval_config = self.config["eval"]
-        eval_seed = eval_config["seed"]
-        num_dev_queries = min(len(dev_pairs), eval_config["num_samples"])
+        dev_config = self.config["dev"]
+        dev_seed = dev_config["seed"]
+        num_dev_queries = min(len(dev_pairs), dev_config["num_samples"])
 
         dev_set, corpus_indices = build_dev_set(
             graph=self.graph,
             dev_pairs=dev_pairs,
             num_dev_queries=num_dev_queries,
-            dev_corpus_size=eval_config["dev_corpus_size"],
-            confuser_fraction=eval_config["confuser_fraction"],
-            seed=eval_seed,
+            dev_corpus_size=dev_config["dev_corpus_size"],
+            confuser_fraction=dev_config["confuser_fraction"],
+            seed=dev_seed,
             is_main_process=self.accelerator.is_main_process,
             logger=logger,
         )
@@ -287,7 +287,7 @@ class GRAFTTrainer:
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-        recall_k = self.config["eval"]["recall_k"]
+        recall_k = self.config["dev"]["recall_k"]
         encoder_batch_size = self.config["encoder"]["dev_batch_size"]
 
         with torch.no_grad():
@@ -341,7 +341,7 @@ class GRAFTTrainer:
             logger.info("Running zero-shot evaluation...")
             zero_shot_recall = self._evaluate()
             logger.info(
-                f"Zero-shot: dev_recall@{self.config['eval']['recall_k']}={zero_shot_recall:.4f}"
+                f"Zero-shot: dev_recall@{self.config['dev']['recall_k']}={zero_shot_recall:.4f}"
             )
             wandb.log({"global_step": 0, "dev_recall": zero_shot_recall})
 
@@ -407,7 +407,7 @@ class GRAFTTrainer:
 
                     if (
                         self.accelerator.sync_gradients
-                        and self.global_step % self.config["train"]["eval_every_steps"]
+                        and self.global_step % self.config["train"]["dev_every_steps"]
                         == 0
                     ):
                         if self.accelerator.is_main_process:
@@ -416,7 +416,7 @@ class GRAFTTrainer:
                             )
                             recall = self._evaluate()
                             logger.info(
-                                f"Step {self.global_step}: dev_recall@{self.config['eval']['recall_k']}={recall:.4f}"
+                                f"Step {self.global_step}: dev_recall@{self.config['dev']['recall_k']}={recall:.4f}"
                             )
                             wandb.log(
                                 {"global_step": self.global_step, "dev_recall": recall}

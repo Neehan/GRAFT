@@ -40,18 +40,26 @@ train:
   bf16: true
   seed: 42
   log_every: 20
-  eval_every_steps: 100
+  dev_every_steps: 100
   # Hard negative mining (subgraph-level)
   hardneg_enabled: true
   hardneg_per_query: 32
 
-eval:
+dev:
   num_samples: 500
   dev_corpus_size: 50000 # Small corpus for fast dev eval during training
-  recall_k: 10 # Check recall@10 for more granular signal
+  recall_k: 5
   query_batch_size: 16
   seed: 42
   confuser_fraction: 0.1
+
+eval:
+  corpus_size: 500000 # null = full corpus, integer = sample for fast iteration (e.g., 500000)
+  corpus_sample_seed: 42 # Fixed seed for reproducible sampling across methods
+  recall_k: [5, 10]
+  joint_recall_k: 10
+  ndcg_k: 10
+  mrr_k: 10
 
 index:
   use_gpu: true

@@ -4,13 +4,24 @@ import argparse
 import logging
 import yaml
 import torch
+import numpy as np
 from pathlib import Path
-from datasets import load_dataset
 
 from baselines.retrievers import GRAFTRetriever, ZeroShotRetriever, BM25Retriever
 from graft.eval.utils import prepare_queries, evaluate_retrieval
+from graft.eval.embed_corpus import embed_corpus_texts
+from graft.models.encoder import load_trained_encoder
 
 logger = logging.getLogger(__name__)
+
+
+def load_embeddings(embeddings_path, sampled_indices):
+    """Load embeddings and slice if sampling."""
+    if sampled_indices is not None:
+        logger.info(f"Loading embeddings and slicing to {len(sampled_indices)} nodes")
+        full_embeddings = np.load(embeddings_path)
+        return full_embeddings[sampled_indices]
+    return np.load(embeddings_path)
 
 
 def main():
@@ -64,26 +75,63 @@ def main():
     logger.info(f"Loading graph from {graph_path}")
     graph = torch.load(str(graph_path), weights_only=False)
 
+    corpus_size = config["eval"].get("corpus_size")
+    corpus_sample_seed = config["eval"].get("corpus_sample_seed", 42)
+
+    if corpus_size is not None:
+        num_nodes = len(graph.node_text)
+        corpus_size = min(corpus_size, num_nodes)
+
+        indices_cache = graph_dir / f"eval_corpus_indices_{corpus_size}.npy"
+        if indices_cache.exists():
+            logger.info(f"Loading sampled corpus indices from {indices_cache}")
+            sampled_indices = np.load(indices_cache)
+        else:
+            logger.info(f"Sampling {corpus_size}/{num_nodes} corpus nodes with seed={corpus_sample_seed}")
+            rng = np.random.default_rng(corpus_sample_seed)
+            sampled_indices = rng.choice(num_nodes, size=corpus_size, replace=False)
+            sampled_indices = np.sort(sampled_indices)
+            np.save(indices_cache, sampled_indices)
+            logger.info(f"Saved sampled indices to {indices_cache}")
+
+        sampled_node_texts = [graph.node_text[i] for i in sampled_indices]
+        old_to_new_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(sampled_indices)}
+        sampled_doc_id_to_id = {
+            doc_id: old_to_new_idx[old_idx]
+            for doc_id, old_idx in graph.doc_id_to_id.items()
+            if old_idx in old_to_new_idx
+        }
+
+        logger.info(f"Sampled corpus: {len(sampled_node_texts)} nodes, {len(sampled_doc_id_to_id)} doc_ids")
+    else:
+        logger.info("Using full corpus for evaluation")
+        sampled_indices = None
+        sampled_node_texts = graph.node_text
+        sampled_doc_id_to_id = graph.doc_id_to_id
+
     logger.info(f"Preparing queries from {args.split} split...")
-    queries = prepare_queries(args.split, graph.doc_id_to_id)
+    queries = prepare_queries(args.split, sampled_doc_id_to_id)
     logger.info(f"Loaded {len(queries)} queries")
 
     topk = config["index"]["topk"]
 
     if args.method == "graft":
-        if not args.encoder_path or not args.embeddings:
-            raise ValueError("GRAFT requires --encoder-path and --embeddings")
-        retriever = GRAFTRetriever(args.encoder_path, args.embeddings, config)
+        if args.embeddings:
+            embeddings = load_embeddings(args.embeddings, sampled_indices)
+        else:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            encoder = load_trained_encoder(args.encoder_path, config, device)
+            embeddings = embed_corpus_texts(encoder, sampled_node_texts, config, device)
+        retriever = GRAFTRetriever(args.encoder_path, embeddings, config)
         method_name = "GRAFT"
 
     elif args.method == "zero-shot":
-        if not args.model_name or not args.embeddings:
-            raise ValueError("Zero-shot requires --model-name and --embeddings")
-        retriever = ZeroShotRetriever(args.model_name, args.embeddings, config)
+        embeddings = load_embeddings(args.embeddings, sampled_indices)
+        retriever = ZeroShotRetriever(args.model_name, embeddings, config)
         method_name = f"ZeroShot-{args.model_name.split('/')[-1]}"
 
     elif args.method == "bm25":
-        retriever = BM25Retriever(graph.node_text)
+        retriever = BM25Retriever(sampled_node_texts)
         method_name = "BM25"
 
     else:
@@ -115,6 +163,7 @@ def main():
         topk,
         method_name,
         args.output,
+        config["eval"],
         batch_size=eval_batch_size,
     )
 
