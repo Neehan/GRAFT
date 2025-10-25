@@ -30,15 +30,13 @@ from graft.data.pair_maker import load_query_pairs
 logger = logging.getLogger("graft.train")
 
 
-def _log_memory(tag):
-    """Log GPU memory usage."""
-    if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated() / 1024**3
-        reserved = torch.cuda.memory_reserved() / 1024**3
-        logger.info(f"[{tag}] GPU memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-
-
 class GRAFTTrainer:
+    def _log_memory(self, tag):
+        """Log GPU memory usage."""
+        if torch.cuda.is_available() and self.accelerator.is_main_process:
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            logger.info(f"[{tag}] GPU memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
     def __init__(self, config_path):
         self.config_path = config_path
         with open(config_path) as f:
@@ -297,7 +295,7 @@ class GRAFTTrainer:
 
     def _evaluate(self):
         """Fast realistic dev eval: retrieve from 100k corpus."""
-        _log_memory("Start dev eval")
+        self._log_memory("Start dev eval")
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
@@ -315,17 +313,17 @@ class GRAFTTrainer:
                 desc="Encoding dev corpus",
                 disable=not self.accelerator.is_main_process,
             )
-            _log_memory("Before corpus encoding")
+            self._log_memory("Before corpus encoding")
             for i in range(0, len(corpus_texts), encoder_batch_size):
                 batch = corpus_texts[i : i + encoder_batch_size]
                 embeds = unwrapped_encoder.encode(batch, self.device)
                 corpus_embeds.append(embeds)
                 pbar.update(len(batch))
                 if i == 0:
-                    _log_memory("After first corpus batch")
+                    self._log_memory("After first corpus batch")
             pbar.close()
             corpus_embeds = torch.cat(corpus_embeds, dim=0)  # (100k, D)
-            _log_memory("After corpus encoding")
+            self._log_memory("After corpus encoding")
 
             # Encode queries in batches and compute top-k
             queries = [item["query"] for item in self.dev_data]
@@ -336,7 +334,7 @@ class GRAFTTrainer:
                 desc="Encoding queries & searching",
                 disable=not self.accelerator.is_main_process,
             )
-            _log_memory("Before query encoding")
+            self._log_memory("Before query encoding")
             for q_start in range(0, len(queries), encoder_batch_size):
                 q_end = min(q_start + encoder_batch_size, len(queries))
                 query_batch = queries[q_start:q_end]
@@ -352,11 +350,11 @@ class GRAFTTrainer:
                 all_top_k_indices.append(top_k_indices.cpu())
                 pbar.update(len(query_batch))
                 if q_start == 0:
-                    _log_memory("After first query batch")
+                    self._log_memory("After first query batch")
             pbar.close()
 
             all_top_k_indices = torch.cat(all_top_k_indices, dim=0)
-            _log_memory("After query encoding")
+            self._log_memory("After query encoding")
 
             # Compute recall@k
             correct = 0
