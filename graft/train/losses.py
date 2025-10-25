@@ -30,8 +30,12 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None):
     batch_size = query_embeds.size(0)
     num_subgraph_nodes = doc_embeds.size(0)
 
-    # Compute scores for all query-document pairs in subgraph: (B, N)
-    scores = torch.matmul(query_embeds, doc_embeds.T) / tau
+    # Normalize embeddings to prevent scale issues with mixed query/subgraph nodes
+    query_embeds = F.normalize(query_embeds, dim=-1)
+    doc_embeds = F.normalize(doc_embeds, dim=-1)
+
+    # Compute scores in float32 for numerical stability
+    scores = torch.matmul(query_embeds.float(), doc_embeds.float().T) / tau
 
     # Build positive mask: mark each query's own positives (B, N)
     pos_mask = torch.zeros(
@@ -51,15 +55,26 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None):
         pos_mask[batch_indices.flatten(), labels.flatten()] = True
 
     # Compute per-query InfoNCE loss
-    # Numerator: logsumexp over positives only
-    pos_scores = scores.masked_fill(~pos_mask, -1e10)
+    # Numerator: logsumexp over positives only (use dtype-safe mask value)
+    mask_val = torch.finfo(scores.dtype).min
+    pos_scores = scores.masked_fill(~pos_mask, mask_val)
     log_numerator = torch.logsumexp(pos_scores, dim=1)  # (B,)
 
     # Denominator: logsumexp over all subgraph nodes (in-batch negatives)
     log_denominator = torch.logsumexp(scores, dim=1)  # (B,)
 
-    # Average loss across batch
-    loss = -(log_numerator - log_denominator).mean()
+    # Compute per-query loss and normalize by number of positives
+    # This prevents batches with many positives from dominating the gradient
+    per_query_loss = -(log_numerator - log_denominator)  # (B,)
+
+    # Count number of positives per query
+    num_positives = pos_mask.sum(dim=1).float()  # (B,)
+
+    # Normalize each query's loss by its number of positives
+    normalized_loss = per_query_loss / num_positives  # (B,)
+
+    # Average across batch
+    loss = normalized_loss.mean()
 
     return loss
 

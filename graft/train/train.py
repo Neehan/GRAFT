@@ -124,6 +124,7 @@ class GRAFTTrainer:
                 query_batch_size=self.config["train"]["query_batch_size"],
                 fanouts=self.config["graph"]["fanouts"],
                 neg_seed_ratio=self.config["graph"]["neg_seed_ratio"],
+                target_subgraph_size=self.config["graph"]["target_subgraph_size"],
                 rank=self.accelerator.process_index,
                 world_size=self.accelerator.num_processes,
             )

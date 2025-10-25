@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class GraphBatchSampler:
     def __init__(
-        self, graph, train_pairs, query_batch_size, fanouts, neg_seed_ratio, rank=0, world_size=1
+        self, graph, train_pairs, query_batch_size, fanouts, neg_seed_ratio, target_subgraph_size, rank=0, world_size=1
     ):
         self.graph = graph
         self.train_pairs = train_pairs
@@ -18,6 +18,7 @@ class GraphBatchSampler:
         self.num_hops = len(fanouts)
         self.fanouts = fanouts
         self.neg_seed_ratio = neg_seed_ratio
+        self.target_subgraph_size = target_subgraph_size
         self.rank = rank
         self.world_size = world_size
 
@@ -96,6 +97,56 @@ class GraphBatchSampler:
 
         return torch.tensor(neg_edges, dtype=torch.long).t()
 
+    def _stabilize_subgraph_size(self, subset, edge_index, all_pos_nodes):
+        """Trim or pad subgraph to reach target size for stable denominator."""
+        num_nodes = len(subset)
+
+        if num_nodes > self.target_subgraph_size:
+            # Trim: keep all positive nodes, sample from others
+            all_pos_set = set(all_pos_nodes)
+            pos_indices = [i for i, node_id in enumerate(subset.tolist()) if node_id in all_pos_set]
+            non_pos_indices = [i for i, node_id in enumerate(subset.tolist()) if node_id not in all_pos_set]
+
+            keep_non_pos = self.target_subgraph_size - len(pos_indices)
+            if keep_non_pos > 0 and non_pos_indices:
+                perm = torch.randperm(len(non_pos_indices))[:keep_non_pos]
+                sampled_non_pos = [non_pos_indices[i] for i in perm.tolist()]
+                keep_indices = pos_indices + sampled_non_pos
+            else:
+                keep_indices = pos_indices[:self.target_subgraph_size]
+
+            keep_indices_tensor = torch.tensor(keep_indices, dtype=torch.long)
+            subset = subset[keep_indices_tensor]
+
+            # Relabel edges
+            node_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(keep_indices)}
+            edge_mask = torch.tensor(
+                [(e0.item() in node_mapping and e1.item() in node_mapping)
+                 for e0, e1 in zip(edge_index[0], edge_index[1])],
+                dtype=torch.bool
+            )
+            edge_index = edge_index[:, edge_mask]
+            edge_index = torch.tensor(
+                [[node_mapping[e0.item()], node_mapping[e1.item()]]
+                 for e0, e1 in zip(edge_index[0], edge_index[1])],
+                dtype=torch.long
+            ).t()
+
+        elif num_nodes < self.target_subgraph_size:
+            # Pad: add random negatives
+            subset_set = set(subset.tolist())
+            num_to_add = self.target_subgraph_size - num_nodes
+            added_nodes = []
+            for _ in range(num_to_add):
+                neg_node = self._sample_negative_seed(list(subset_set) + added_nodes)
+                if neg_node is not None:
+                    added_nodes.append(neg_node)
+
+            if added_nodes:
+                subset = torch.cat([subset, torch.tensor(added_nodes, dtype=torch.long)])
+
+        return subset, edge_index
+
     def __iter__(self):
         for batch_idx in range(0, len(self.train_pairs) // self.batch_size):
             if batch_idx % self.world_size != self.rank:
@@ -123,6 +174,9 @@ class GraphBatchSampler:
 
             # Use proper neighbor sampling with fanouts
             subset, edge_index = self._sample_neighbors(seed_nodes)
+
+            # Stabilize subgraph size for constant denominator in InfoNCE
+            subset, edge_index = self._stabilize_subgraph_size(subset, edge_index, all_pos_nodes)
 
             num_nodes = len(subset)
             num_pos_edges = edge_index.size(1)
