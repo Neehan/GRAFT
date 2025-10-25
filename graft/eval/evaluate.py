@@ -96,21 +96,23 @@ def main():
 
         sampled_node_texts = [graph.node_text[i] for i in sampled_indices]
         old_to_new_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(sampled_indices)}
-        sampled_doc_id_to_id = {
-            doc_id: old_to_new_idx[old_idx]
-            for doc_id, old_idx in graph.doc_id_to_id.items()
-            if old_idx in old_to_new_idx
+        sampled_doc_id_to_node_ids = {
+            doc_id: [old_to_new_idx[old_idx] for old_idx in node_ids if old_idx in old_to_new_idx]
+            for doc_id, node_ids in graph.doc_id_to_node_ids.items()
+        }
+        sampled_doc_id_to_node_ids = {
+            doc_id: node_ids for doc_id, node_ids in sampled_doc_id_to_node_ids.items() if node_ids
         }
 
-        logger.info(f"Sampled corpus: {len(sampled_node_texts)} nodes, {len(sampled_doc_id_to_id)} doc_ids")
+        logger.info(f"Sampled corpus: {len(sampled_node_texts)} nodes, {len(sampled_doc_id_to_node_ids)} doc_ids")
     else:
         logger.info("Using full corpus for evaluation")
         sampled_indices = None
         sampled_node_texts = graph.node_text
-        sampled_doc_id_to_id = graph.doc_id_to_id
+        sampled_doc_id_to_node_ids = graph.doc_id_to_node_ids
 
     logger.info(f"Preparing queries from {args.split} split...")
-    queries = prepare_queries(args.split, sampled_doc_id_to_id)
+    queries = prepare_queries(args.split, sampled_doc_id_to_node_ids)
     logger.info(f"Loaded {len(queries)} queries")
 
     topk = config["index"]["topk"]

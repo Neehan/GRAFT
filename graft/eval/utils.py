@@ -15,12 +15,12 @@ from graft.eval.metrics import (
 logger = logging.getLogger(__name__)
 
 
-def prepare_queries(split, doc_id_to_id):
+def prepare_queries(split, doc_id_to_node_ids):
     """Extract queries with gold document IDs from mteb/hotpotqa.
 
     Args:
         split: Dataset split (train/dev/test)
-        doc_id_to_id: Mapping from document ID to node ID
+        doc_id_to_node_ids: Mapping from document ID to list of node IDs (all chunks)
 
     Returns:
         List of dicts with keys: id, question, gold_ids
@@ -36,10 +36,10 @@ def prepare_queries(split, doc_id_to_id):
         doc_id = item["corpus-id"]
         score = item["score"]
 
-        if score > 0 and doc_id in doc_id_to_id:
+        if score > 0 and doc_id in doc_id_to_node_ids:
             if qid not in query_gold_docs:
                 query_gold_docs[qid] = {"query": qid_to_query.get(qid), "gold_ids": []}
-            query_gold_docs[qid]["gold_ids"].append(doc_id_to_id[doc_id])
+            query_gold_docs[qid]["gold_ids"].extend(doc_id_to_node_ids[doc_id])
 
     queries = []
     for qid, data in query_gold_docs.items():
