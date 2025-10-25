@@ -35,8 +35,8 @@ loss:
   alpha_link: 0.0
 
 train:
-  query_batch_size: 6
-  gradient_accumulation_steps: 10
+  query_batch_size: 4
+  gradient_accumulation_steps: 16
   epochs: 3
   lr_encoder: 1.0e-5
   weight_decay: 0.01
@@ -44,7 +44,7 @@ train:
   grad_clip: 1.0
   bf16: true
   seed: 42
-  log_every: 10
+  log_every: 20
   dev_every_steps: 100
 
 dev:
