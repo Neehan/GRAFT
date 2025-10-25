@@ -16,7 +16,7 @@ encoder:
   max_len: 256
   pool: cls
   freeze_layers: 0
-  train_batch_size: 128
+  train_batch_size: 256
   dev_batch_size: 1024
   eval_batch_size: 2048
 
@@ -30,7 +30,7 @@ loss:
   alpha_link: 0.0
 
 train:
-  query_batch_size: 4
+  query_batch_size: 8
   gradient_accumulation_steps: 16
   epochs: 3
   lr_encoder: 2.0e-5
@@ -47,7 +47,7 @@ train:
 
 dev:
   num_samples: 500
-  dev_corpus_size: 100000 # Small corpus for fast dev eval during training
+  dev_corpus_size: 10000 # Small corpus for fast dev eval during training
   recall_k: 5
   seed: 42
   confuser_fraction: 0.1
