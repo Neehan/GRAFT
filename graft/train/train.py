@@ -251,8 +251,6 @@ class GRAFTTrainer:
         """Fast realistic dev eval: retrieve from 100k corpus."""
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-        st_encoder = unwrapped_encoder.get_sentence_transformer()
-        st_encoder.to(self.device)
 
         recall_k = self.config["dev"]["recall_k"]
         encoder_batch_size = self.config["encoder"]["dev_batch_size"]
@@ -261,23 +259,25 @@ class GRAFTTrainer:
             corpus_texts = [
                 self.graph.node_text[idx] for idx in self.dev_corpus_indices
             ]
-            corpus_embeds = st_encoder.encode(
+            corpus_embeds = unwrapped_encoder.encode_with_grad(
                 corpus_texts,
                 convert_to_tensor=True,
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
                 batch_size=encoder_batch_size,
                 show_progress_bar=self.accelerator.is_main_process,
-                device=str(self.device),
+                device=self.device,
+                convert_to_numpy=False,
             )
 
             queries = [item["query"] for item in self.dev_data]
-            query_embeds = st_encoder.encode(
+            query_embeds = unwrapped_encoder.encode_with_grad(
                 queries,
                 convert_to_tensor=True,
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
                 batch_size=encoder_batch_size,
                 show_progress_bar=self.accelerator.is_main_process,
-                device=str(self.device),
+                device=self.device,
+                convert_to_numpy=False,
             )
 
             # Compute scores: (num_queries, corpus_size)
