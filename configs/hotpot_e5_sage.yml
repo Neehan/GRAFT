@@ -22,6 +22,9 @@ encoder:
 
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
+  neg_seed_ratio: 0.25 # Number of negative seeds = neg_seed_ratio * num_positive_seeds
+  hardneg_enabled: true # Hard negative mining from subgraph
+  hardneg_per_query: 32 # Number of hard negatives to mine per query
 
 loss:
   tau: 0.1 # InfoNCE temperature
@@ -41,9 +44,6 @@ train:
   seed: 42
   log_every: 10
   dev_every_steps: 100
-  # Hard negative mining (subgraph-level)
-  hardneg_enabled: true
-  hardneg_per_query: 64
 
 dev:
   num_samples: 1000

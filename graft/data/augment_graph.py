@@ -71,7 +71,7 @@ def embed_graph_nodes(graph, config, device=None):
 
             # Use autocast for mixed precision
             if use_amp:
-                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):  # type: ignore
                     batch_embeds = _encode_batch(encoder, batch, config, device)
             else:
                 batch_embeds = _encode_batch(encoder, batch, config, device)

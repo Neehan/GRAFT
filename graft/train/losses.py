@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_negs=None):
     """Soft-OR InfoNCE with optional hard negatives and label masking.
 
+    Computes loss per-query to avoid cross-contamination of positives across queries in batch.
+
     Args:
         query_embeds: (B, D)
         doc_embeds: (N, D) all nodes in subgraph
@@ -21,54 +23,28 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_
     Returns:
         Scalar loss
     """
+    batch_size = query_embeds.size(0)
+
+    pos_mask = torch.zeros((batch_size, labels.size(1)), dtype=torch.bool, device=query_embeds.device)
+    if labels_mask is not None:
+        pos_mask = labels_mask
+    else:
+        pos_mask = torch.ones_like(labels, dtype=torch.bool)
+
+    pos_indices_expanded = labels.unsqueeze(2)
+    pos_embeds = doc_embeds[labels]
+    pos_scores = (query_embeds.unsqueeze(1) * pos_embeds).sum(dim=2) / tau
+    pos_scores = pos_scores.masked_fill(~pos_mask, -1e10)
+
     if hard_negs is not None:
         hard_neg_embeds = doc_embeds[hard_negs]
-        scores_in_batch = torch.matmul(query_embeds, doc_embeds.T) / tau
-        scores_hard = torch.matmul(query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)).squeeze(1) / tau
-        scores = torch.cat([scores_in_batch, scores_hard], dim=1)
+        neg_scores = torch.matmul(query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)).squeeze(1) / tau
+        all_scores = torch.cat([pos_scores, neg_scores], dim=1)
     else:
-        scores = torch.matmul(query_embeds, doc_embeds.T) / tau
+        all_scores = pos_scores
 
-    if labels.dim() == 1:
-        return F.cross_entropy(scores, labels)
-
-    batch_size, num_candidates = scores.size()
-    pos_mask = torch.zeros_like(scores, dtype=torch.bool)
-
-    if labels_mask is not None:
-        # Use mask to filter valid labels
-        for i in range(batch_size):
-            valid_idx = labels[i][labels_mask[i]]
-            if len(valid_idx) > 0:
-                pos_mask[i, valid_idx] = True
-    else:
-        # All labels are valid
-        batch_indices = torch.arange(batch_size, device=scores.device).unsqueeze(1)
-        pos_mask[batch_indices, labels] = True
-
-    pos_counts = pos_mask.sum(dim=1)
-    neg_counts = num_candidates - pos_counts
-
-    zero_neg_indices = torch.nonzero(neg_counts == 0, as_tuple=False).view(-1).tolist()
-    if zero_neg_indices:
-        logger.warning(
-            "InfoNCE: queries with no negatives detected (indices %s); candidates=%d, pos_counts=%s",
-            zero_neg_indices,
-            num_candidates,
-            pos_counts.detach().cpu().tolist(),
-        )
-    elif logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "InfoNCE stats: candidates=%d, pos_counts=%s, neg_counts=%s",
-            num_candidates,
-            pos_counts.detach().cpu().tolist(),
-            neg_counts.detach().cpu().tolist(),
-        )
-
-    # Mask out non-positives with large negative value
-    pos_scores = scores.masked_fill(~pos_mask, -1e10)
     log_numerator = torch.logsumexp(pos_scores, dim=1)
-    log_denominator = torch.logsumexp(scores, dim=1)
+    log_denominator = torch.logsumexp(all_scores, dim=1)
     loss = -(log_numerator - log_denominator).mean()
 
     return loss

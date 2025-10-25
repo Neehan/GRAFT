@@ -10,7 +10,7 @@ class HardNegativeMiner:
     """Mine hard negatives from subgraph via similarity ranking."""
 
     def __init__(self, config):
-        self.num_hard_negs = config["train"]["hardneg_per_query"]
+        self.num_hard_negs = config["graph"]["hardneg_per_query"]
 
     def mine_hard_negatives(self, query_embeds, subgraph_embeds, positive_indices):
         """Mine hard negatives from subgraph.

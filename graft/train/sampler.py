@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 
 class GraphBatchSampler:
     def __init__(
-        self, graph, train_pairs, query_batch_size, fanouts, rank=0, world_size=1
+        self, graph, train_pairs, query_batch_size, fanouts, neg_seed_ratio, rank=0, world_size=1
     ):
         self.graph = graph
         self.train_pairs = train_pairs
         self.batch_size = query_batch_size
         self.num_hops = len(fanouts)
         self.fanouts = fanouts
+        self.neg_seed_ratio = neg_seed_ratio
         self.rank = rank
         self.world_size = world_size
 
@@ -111,10 +112,14 @@ class GraphBatchSampler:
                 all_pos_nodes.extend(nodes)
             all_pos_nodes = list(dict.fromkeys(all_pos_nodes))
 
-            extra_seed = self._sample_negative_seed(all_pos_nodes)
-            seed_nodes = all_pos_nodes + (
-                [extra_seed] if extra_seed is not None else []
-            )
+            num_neg_seeds = int(len(all_pos_nodes) * self.neg_seed_ratio)
+            neg_seeds = []
+            for _ in range(num_neg_seeds):
+                neg_seed = self._sample_negative_seed(all_pos_nodes + neg_seeds)
+                if neg_seed is not None:
+                    neg_seeds.append(neg_seed)
+
+            seed_nodes = all_pos_nodes + neg_seeds
 
             # Use proper neighbor sampling with fanouts
             subset, edge_index = self._sample_neighbors(seed_nodes)

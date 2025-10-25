@@ -141,6 +141,7 @@ class GRAFTTrainer:
                 train_pairs=train_pairs,
                 query_batch_size=self.config["train"]["query_batch_size"],
                 fanouts=self.config["graph"]["fanouts"],
+                neg_seed_ratio=self.config["graph"]["neg_seed_ratio"],
                 rank=self.accelerator.process_index,
                 world_size=self.accelerator.num_processes,
             )
@@ -172,7 +173,7 @@ class GRAFTTrainer:
 
     def _setup_hard_neg_miner(self):
         """Initialize hard negative miner (subgraph-level)."""
-        if self.config["train"]["hardneg_enabled"]:
+        if self.config["graph"]["hardneg_enabled"]:
             self.hard_neg_miner = HardNegativeMiner(self.config)
             if self.accelerator.is_main_process:
                 logger.info("Hard negative miner enabled")
