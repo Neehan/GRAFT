@@ -51,9 +51,24 @@ accelerate launch \
 
 echo "Training complete!"
 
-# Extract output directory from config and run evaluation
+# Extract output directory and build encoder filename with kNN suffix
+ENCODER_PATH=$(python -c "
+import yaml
+config = yaml.safe_load(open('$CONFIG_PATH'))
+output_dir = config['experiment']['output_dir']
+semantic_k = config['data'].get('semantic_k')
+knn_only = config['data'].get('knn_only', False)
+
+if semantic_k is not None:
+    suffix = f'_knn_only{semantic_k}' if knn_only else f'_knn{semantic_k}'
+    filename = f'encoder_final{suffix}.pt'
+else:
+    filename = 'encoder_final.pt'
+
+print(f'{output_dir}/{filename}')
+")
+
 OUTPUT_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['experiment']['output_dir'])")
-ENCODER_PATH="${OUTPUT_DIR}/encoder_final.pt"
 
 echo ""
 echo "=== Running evaluation ==="
