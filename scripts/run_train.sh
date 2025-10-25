@@ -50,3 +50,11 @@ accelerate launch \
     graft/train/train.py "$CONFIG_PATH"
 
 echo "Training complete!"
+
+# Extract output directory from config and run evaluation
+OUTPUT_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['experiment']['output_dir'])")
+ENCODER_PATH="${OUTPUT_DIR}/encoder_final.pt"
+
+echo ""
+echo "=== Running evaluation ==="
+bash scripts/run_eval_graft.sh "$ENCODER_PATH" "$CONFIG_PATH" "$OUTPUT_DIR" validation

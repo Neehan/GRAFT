@@ -283,7 +283,7 @@ class GRAFTTrainer:
         return {"loss": loss, "loss_q2d": loss_q2d, "loss_nbr": loss_nbr}
 
     def _evaluate(self):
-        """Fast realistic dev eval: retrieve from 50k corpus."""
+        """Fast realistic dev eval: retrieve from 100k corpus."""
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
@@ -300,28 +300,33 @@ class GRAFTTrainer:
                 batch = corpus_texts[i : i + encoder_batch_size]
                 embeds = unwrapped_encoder.encode(batch, self.device)
                 corpus_embeds.append(embeds)
-            corpus_embeds = torch.cat(corpus_embeds, dim=0)  # (50k, D)
+            corpus_embeds = torch.cat(corpus_embeds, dim=0)  # (100k, D)
 
-            # Encode queries and compute scores
+            # Encode queries in batches and compute top-k
             queries = [item["query"] for item in self.dev_data]
-            query_embeds = []
-            for i in range(0, len(queries), encoder_batch_size):
-                batch = queries[i : i + encoder_batch_size]
-                embeds = unwrapped_encoder.encode(batch, self.device)
-                query_embeds.append(embeds)
-            query_embeds = torch.cat(query_embeds, dim=0)  # (500, D)
+            all_top_k_indices = []
 
-            # Compute all similarities: (500, 50k)
-            scores = torch.matmul(query_embeds, corpus_embeds.T)
+            for q_start in range(0, len(queries), encoder_batch_size):
+                q_end = min(q_start + encoder_batch_size, len(queries))
+                query_batch = queries[q_start:q_end]
 
-            # Get top-k per query
-            _, top_k_indices = torch.topk(scores, k=recall_k, dim=1)
+                # Encode query batch
+                query_embeds = unwrapped_encoder.encode(query_batch, self.device)
+
+                # Compute scores for this query batch: (batch_size, corpus_size)
+                scores = torch.matmul(query_embeds, corpus_embeds.T)
+
+                # Get top-k per query
+                _, top_k_indices = torch.topk(scores, k=recall_k, dim=1)
+                all_top_k_indices.append(top_k_indices.cpu())
+
+            all_top_k_indices = torch.cat(all_top_k_indices, dim=0)
 
             # Compute recall@k
             correct = 0
             for i, item in enumerate(self.dev_data):
                 gold_set = set(item["gold_positions"])
-                retrieved_set = set(top_k_indices[i].cpu().tolist())
+                retrieved_set = set(all_top_k_indices[i].tolist())
                 if gold_set & retrieved_set:
                     correct += 1
 
