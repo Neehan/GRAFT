@@ -13,8 +13,10 @@ data:
 
 encoder:
   model_name: intfloat/e5-base-v2
-  max_len: 256
-  pool: cls
+  max_len: 512
+  pool: mean
+  normalize: true
+  padding: true
   freeze_layers: 0
   train_batch_size: 256
   dev_batch_size: 1024

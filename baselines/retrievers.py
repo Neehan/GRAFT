@@ -48,7 +48,6 @@ class ZeroShotRetriever(BaseRetriever):
             )
         self._load_encoder(model_name)
         embeddings = self._load_embeddings(embeddings_source)
-        embeddings = self.normalize_embeddings(embeddings)
         device_pref = "cuda" if self.device.type == "cuda" else "cpu"
         self.index = self.build_index(embeddings, self.index_config, device=device_pref)
         logger.info(f"FAISS query chunk size set to {self.search_batch_size}")
@@ -78,17 +77,6 @@ class ZeroShotRetriever(BaseRetriever):
             raise TypeError(
                 f"Unsupported embeddings source type: {type(source)} (expected str or np.ndarray)"
             )
-
-    @staticmethod
-    def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
-        """Convert embeddings to contiguous float32 and L2-normalize."""
-        if embeddings.dtype != np.float32:
-            logger.info("Converting embeddings to float32 for FAISS")
-            embeddings = embeddings.astype(np.float32)
-
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        embeddings = embeddings / norms
-        return np.ascontiguousarray(embeddings, dtype=np.float32)
 
     @staticmethod
     def build_index(

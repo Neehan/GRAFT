@@ -34,6 +34,8 @@ def embed_graph_nodes(graph, config, device=None):
         max_len=config["encoder"]["max_len"],
         pool=config["encoder"]["pool"],
         freeze_layers=0,
+        normalize=config["encoder"]["normalize"],
+        padding=config["encoder"]["padding"],
     )
 
     # Multi-GPU support
@@ -88,44 +90,22 @@ def _encode_batch(encoder, texts, config, device):
     Handles both DataParallel and single-GPU cases.
     """
     # Access tokenizer from encoder or encoder.module
-    if hasattr(encoder, "module"):
-        tokenizer = encoder.module.tokenizer
-        max_len = encoder.module.max_len
-        pool = encoder.module.pool
-    else:
-        tokenizer = encoder.tokenizer
-        max_len = encoder.max_len
-        pool = encoder.pool
+    encoder_ref = encoder.module if hasattr(encoder, "module") else encoder
+    tokenizer = encoder_ref.tokenizer
+    max_len = encoder_ref.max_len
+    padding = encoder_ref.padding
 
     encoded = tokenizer(
         texts,
         max_length=max_len,
-        padding=True,
+        padding=padding,
         truncation=True,
         return_tensors="pt",
     )
     input_ids = encoded["input_ids"].to(device)
     attention_mask = encoded["attention_mask"].to(device)
 
-    # Forward pass
-    if hasattr(encoder, "module"):
-        outputs = encoder.module.model(
-            input_ids=input_ids, attention_mask=attention_mask
-        )
-    else:
-        outputs = encoder.model(input_ids=input_ids, attention_mask=attention_mask)
-
-    # Pooling
-    if pool == "cls":
-        embeddings = outputs.last_hidden_state[:, 0]
-    elif pool == "mean":
-        embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
-            1
-        ) / attention_mask.sum(-1, keepdim=True)
-    else:
-        raise ValueError(f"Unknown pooling method: {pool}")
-
-    return embeddings
+    return encoder(input_ids, attention_mask)
 
 
 def build_knn_edges(embeddings, k, config):
@@ -140,9 +120,6 @@ def build_knn_edges(embeddings, k, config):
         List of (src, dst) tuples
     """
     num_nodes, _ = embeddings.shape
-
-    logger.info("Normalizing embeddings for FAISS")
-    embeddings = ZeroShotRetriever.normalize_embeddings(embeddings)
 
     logger.info(f"Building Flat index: {num_nodes} nodes (exact search)")
     device = "cuda" if torch.cuda.is_available() else "cpu"

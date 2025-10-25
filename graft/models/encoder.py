@@ -1,17 +1,28 @@
-"""HuggingFace transformer encoder with CLS/mean pooling for dual-encoder retrieval."""
+"""HuggingFace transformer encoder with mean pooling for dual-encoder retrieval."""
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 
 
 class Encoder(nn.Module):
-    def __init__(self, model_name, max_len, pool, freeze_layers):
+    def __init__(
+        self,
+        model_name,
+        max_len,
+        pool,
+        freeze_layers,
+        normalize,
+        padding,
+    ):
         super().__init__()
         self.model = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.max_len = max_len
         self.pool = pool
+        self.normalize = normalize
+        self.padding = padding
 
         if freeze_layers > 0:
             for param in list(self.model.parameters())[:freeze_layers]:
@@ -23,11 +34,16 @@ class Encoder(nn.Module):
         if self.pool == "cls":
             embeddings = outputs.last_hidden_state[:, 0]
         elif self.pool == "mean":
-            embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
-                1
-            ) / attention_mask.sum(-1, keepdim=True)
+            last_hidden = outputs.last_hidden_state
+            masked_hidden = last_hidden.masked_fill(
+                ~attention_mask[..., None].bool(), 0.0
+            )
+            embeddings = masked_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
         else:
             raise ValueError(f"Unknown pooling method: {self.pool}")
+
+        if self.normalize:
+            embeddings = F.normalize(embeddings, p=2, dim=-1)
 
         return embeddings
 
@@ -35,7 +51,7 @@ class Encoder(nn.Module):
         encoded = self.tokenizer(
             texts,
             max_length=self.max_len,
-            padding=True,
+            padding=self.padding,
             truncation=True,
             return_tensors="pt",
         )
@@ -64,6 +80,8 @@ def load_trained_encoder(checkpoint_path, config, device):
         max_len=config["encoder"]["max_len"],
         pool=config["encoder"]["pool"],
         freeze_layers=0,
+        normalize=config["encoder"]["normalize"],
+        padding=config["encoder"]["padding"],
     )
     encoder.load_state_dict(
         torch.load(checkpoint_path, map_location=device, weights_only=True)
@@ -89,6 +107,8 @@ def load_zero_shot_encoder(model_name, config, device):
         max_len=config["encoder"]["max_len"],
         pool=config["encoder"]["pool"],
         freeze_layers=0,
+        normalize=config["encoder"]["normalize"],
+        padding=config["encoder"]["padding"],
     )
     encoder.to(device)
     encoder.eval()

@@ -103,6 +103,8 @@ class GRAFTTrainer:
             max_len=self.config["encoder"]["max_len"],
             pool=self.config["encoder"]["pool"],
             freeze_layers=self.config["encoder"]["freeze_layers"],
+            normalize=self.config["encoder"]["normalize"],
+            padding=self.config["encoder"]["padding"],
         )
 
         self.tokenizer = self.encoder.tokenizer
