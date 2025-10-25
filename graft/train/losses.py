@@ -30,10 +30,6 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None):
     batch_size = query_embeds.size(0)
     num_subgraph_nodes = doc_embeds.size(0)
 
-    # Normalize embeddings to prevent scale issues with mixed query/subgraph nodes
-    query_embeds = F.normalize(query_embeds, dim=-1)
-    doc_embeds = F.normalize(doc_embeds, dim=-1)
-
     # Compute scores in float32 for numerical stability
     scores = torch.matmul(query_embeds.float(), doc_embeds.float().T) / tau
 
