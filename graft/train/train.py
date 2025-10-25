@@ -153,7 +153,8 @@ class GRAFTTrainer:
 
     def _encode_texts(self, texts):
         """Encode texts with gradient tracking (matches SentenceTransformer.encode)."""
-        return self.encoder.encode_with_grad(
+        unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
+        return unwrapped_encoder.encode_with_grad(
             texts,
             batch_size=self.config["encoder"]["train_batch_size"],
             convert_to_tensor=True,
