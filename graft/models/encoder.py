@@ -34,11 +34,9 @@ class Encoder(nn.Module):
         if self.pool == "cls":
             embeddings = outputs.last_hidden_state[:, 0]
         elif self.pool == "mean":
-            last_hidden = outputs.last_hidden_state
-            masked_hidden = last_hidden.masked_fill(
-                ~attention_mask[..., None].bool(), 0.0
-            )
-            embeddings = masked_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+            embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
+                1
+            ) / attention_mask.sum(-1, keepdim=True)
         else:
             raise ValueError(f"Unknown pooling method: {self.pool}")
 

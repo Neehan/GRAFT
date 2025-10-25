@@ -18,7 +18,7 @@ encoder:
   normalize: true
   padding: true
   freeze_layers: 0
-  train_batch_size: 128
+  train_batch_size: 256
   dev_batch_size: 1024
   eval_batch_size: 2048
 
