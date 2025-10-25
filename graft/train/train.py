@@ -338,7 +338,20 @@ class GRAFTTrainer:
             output_dir = Path(self.config["experiment"]["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-            torch.save(unwrapped_encoder.state_dict(), output_dir / f"encoder_{tag}.pt")
+
+            # Build filename with kNN info (same as wandb run name)
+            semantic_k = self.config["data"]["semantic_k"]
+            knn_only = self.config["data"]["knn_only"]
+
+            if semantic_k is not None:
+                suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+                filename = f"encoder_{tag}{suffix}.pt"
+            else:
+                filename = f"encoder_{tag}.pt"
+
+            checkpoint_path = output_dir / filename
+            torch.save(unwrapped_encoder.state_dict(), checkpoint_path)
+            logger.info(f"Saved checkpoint: {checkpoint_path}")
 
     def train(self):
         """Main training loop."""

@@ -17,7 +17,7 @@ encoder:
   pool: cls
   freeze_layers: 0
   train_batch_size: 128
-  dev_batch_size: 128
+  dev_batch_size: 16
   eval_batch_size: 2048
 
 graph:
