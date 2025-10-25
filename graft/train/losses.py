@@ -8,43 +8,77 @@ logger = logging.getLogger(__name__)
 
 
 def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_negs=None):
-    """Soft-OR InfoNCE with optional hard negatives and label masking.
+    """Soft-OR InfoNCE with in-batch negatives and optional hard negatives.
 
-    Computes loss per-query to avoid cross-contamination of positives across queries in batch.
+    Standard in-batch negative sampling (Karpukhin et al., 2020):
+    For each query i:
+      - Numerator: logsumexp over query i's positives only
+      - Denominator: logsumexp over ALL subgraph nodes + hard negatives
+      - Other queries' positives are treated as negatives (realistic hard negatives)
 
     Args:
         query_embeds: (B, D)
-        doc_embeds: (N, D) all nodes in subgraph
-        labels: (B, K) positive node indices (padded with zeros)
+        doc_embeds: (N, D) all nodes in subgraph (shared across batch)
+        labels: (B, K) positive node indices into doc_embeds, per query
         tau: temperature
         labels_mask: (B, K) boolean mask for valid labels (handles variable positives)
-        hard_negs: (B, M) hard negative node indices (mined from subgraph)
+        hard_negs: (B, M) hard negative node indices into doc_embeds, per query
 
     Returns:
-        Scalar loss
+        Scalar loss (averaged across B queries)
     """
     batch_size = query_embeds.size(0)
+    num_subgraph_nodes = doc_embeds.size(0)
 
-    pos_mask = torch.zeros((batch_size, labels.size(1)), dtype=torch.bool, device=query_embeds.device)
+    # Compute scores for all query-document pairs in subgraph: (B, N)
+    scores_subgraph = torch.matmul(query_embeds, doc_embeds.T) / tau
+
+    # Build positive mask: mark each query's own positives (B, N)
+    # Use advanced indexing to vectorize: scatter labels into (B, N) mask
+    pos_mask_subgraph = torch.zeros(
+        (batch_size, num_subgraph_nodes), dtype=torch.bool, device=query_embeds.device
+    )
+
+    # Create batch indices for scatter: [0,0,0,...,1,1,1,...,B-1,B-1,...]
+    batch_indices = torch.arange(batch_size, device=query_embeds.device).unsqueeze(1).expand_as(labels)
+
     if labels_mask is not None:
-        pos_mask = labels_mask
+        # Only scatter valid labels
+        valid_batch_idx = batch_indices[labels_mask]
+        valid_labels = labels[labels_mask]
+        pos_mask_subgraph[valid_batch_idx, valid_labels] = True
     else:
-        pos_mask = torch.ones_like(labels, dtype=torch.bool)
+        # Scatter all labels
+        pos_mask_subgraph[batch_indices.flatten(), labels.flatten()] = True
 
-    pos_indices_expanded = labels.unsqueeze(2)
-    pos_embeds = doc_embeds[labels]
-    pos_scores = (query_embeds.unsqueeze(1) * pos_embeds).sum(dim=2) / tau
-    pos_scores = pos_scores.masked_fill(~pos_mask, -1e10)
-
+    # Add hard negatives if provided
     if hard_negs is not None:
-        hard_neg_embeds = doc_embeds[hard_negs]
-        neg_scores = torch.matmul(query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)).squeeze(1) / tau
-        all_scores = torch.cat([pos_scores, neg_scores], dim=1)
-    else:
-        all_scores = pos_scores
+        hard_neg_embeds = doc_embeds[hard_negs]  # (B, M, D)
+        scores_hard = torch.matmul(
+            query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)
+        ).squeeze(1) / tau  # (B, M)
 
-    log_numerator = torch.logsumexp(pos_scores, dim=1)
-    log_denominator = torch.logsumexp(all_scores, dim=1)
+        # Concatenate subgraph and hard negative scores
+        all_scores = torch.cat([scores_subgraph, scores_hard], dim=1)  # (B, N+M)
+
+        # Extend positive mask (hard negs are never positives)
+        pos_mask_hard = torch.zeros(
+            (batch_size, hard_negs.size(1)), dtype=torch.bool, device=query_embeds.device
+        )
+        pos_mask = torch.cat([pos_mask_subgraph, pos_mask_hard], dim=1)  # (B, N+M)
+    else:
+        all_scores = scores_subgraph
+        pos_mask = pos_mask_subgraph
+
+    # Compute per-query InfoNCE loss
+    # Numerator: logsumexp over positives only
+    pos_scores = all_scores.masked_fill(~pos_mask, -1e10)
+    log_numerator = torch.logsumexp(pos_scores, dim=1)  # (B,)
+
+    # Denominator: logsumexp over all candidates (in-batch negatives + hard negatives)
+    log_denominator = torch.logsumexp(all_scores, dim=1)  # (B,)
+
+    # Average loss across batch
     loss = -(log_numerator - log_denominator).mean()
 
     return loss
