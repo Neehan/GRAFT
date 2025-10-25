@@ -23,9 +23,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 from graft.models.encoder import Encoder
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
-from graft.train.hard_neg_miner import HardNegativeMiner
 from graft.train.dev_utils import build_dev_set
 from graft.data.pair_maker import load_query_pairs
+from graft.utils import get_knn_suffix
 
 logger = logging.getLogger("graft.train")
 
@@ -62,14 +62,8 @@ class GRAFTTrainer:
         if self.accelerator.is_main_process:
             # Build run name with kNN info
             base_name = self.config["experiment"]["name"]
-            semantic_k = self.config["data"]["semantic_k"]
-            knn_only = self.config["data"]["knn_only"]
-
-            if semantic_k is not None:
-                suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
-                run_name = f"{base_name}{suffix}"
-            else:
-                run_name = base_name
+            suffix = get_knn_suffix(self.config)
+            run_name = f"{base_name}{suffix}" if suffix else base_name
 
             wandb.init(
                 project="graft",
@@ -79,15 +73,9 @@ class GRAFTTrainer:
             wandb.define_metric("global_step")
             wandb.define_metric("*", step_metric="global_step")
 
-        # self._log_memory("After accelerator init")
         self._setup_models()
-        # self._log_memory("After setup_models")
         self._setup_data()
-        # self._log_memory("After setup_data")
         self._setup_training()
-        # self._log_memory("After setup_training")
-        self._setup_hard_neg_miner()
-        # self._log_memory("After setup_hard_neg_miner")
 
         self.global_step: int = 0
         self.best_recall: float = 0.0
@@ -96,14 +84,8 @@ class GRAFTTrainer:
         """Get path to prepared graph."""
         graph_dir = Path(self.config["data"]["graph_dir"])
         graph_name = self.config["data"]["graph_name"]
-        semantic_k = self.config["data"]["semantic_k"]
-        knn_only = self.config["data"]["knn_only"]
-
-        if semantic_k is None:
-            graph_path = graph_dir / f"{graph_name}.pt"
-        else:
-            suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
-            graph_path = graph_dir / f"{graph_name}{suffix}.pt"
+        suffix = get_knn_suffix(self.config)
+        graph_path = graph_dir / f"{graph_name}{suffix}.pt"
 
         if not graph_path.exists():
             raise FileNotFoundError(
@@ -170,15 +152,6 @@ class GRAFTTrainer:
         self.encoder, self.optimizer, self.scheduler = self.accelerator.prepare(
             self.encoder, optimizer, scheduler
         )
-
-    def _setup_hard_neg_miner(self):
-        """Initialize hard negative miner (subgraph-level)."""
-        if self.config["graph"]["hardneg_enabled"]:
-            self.hard_neg_miner = HardNegativeMiner(self.config)
-            if self.accelerator.is_main_process:
-                logger.info("Hard negative miner enabled")
-        else:
-            self.hard_neg_miner = None
 
     def _encode_texts(self, texts):
         """Tokenize and encode texts in one forward pass."""
@@ -258,27 +231,7 @@ class GRAFTTrainer:
         labels = torch.stack(labels_list, dim=0)
         labels_mask = torch.stack(mask_list, dim=0)
 
-        # Mine hard negatives from subgraph
-        hard_negs = None
-        if self.hard_neg_miner is not None:
-            # Convert pos_nodes (global IDs) to subgraph indices
-            pos_indices_list = []
-            for pos_nodes in batch["pos_nodes"]:
-                pos_tensor = torch.tensor(
-                    pos_nodes, device=self.device, dtype=torch.long
-                )
-                matches = (subgraph_ids.unsqueeze(0) == pos_tensor.unsqueeze(1)).any(
-                    dim=0
-                )
-                pos_indices_list.append(
-                    matches.nonzero(as_tuple=False).squeeze(-1).tolist()
-                )
-
-            hard_negs = self.hard_neg_miner.mine_hard_negatives(
-                query_embeds, node_embeds, pos_indices_list
-            )
-
-        # Loss
+        # Loss: hard negatives come from neg_seed_ratio in sampler (already in subgraph)
         loss, loss_q2d, loss_nbr = compute_total_loss(
             query_embeds=query_embeds,
             doc_embeds=node_embeds,
@@ -288,7 +241,6 @@ class GRAFTTrainer:
             pos_edges=batch["pos_edges"].to(self.device),
             neg_edges=batch["neg_edges"].to(self.device),
             labels_mask=labels_mask,
-            hard_negs=hard_negs,
             **{
                 k: self.config["loss"][k]
                 for k in ["lambda_q2d", "tau", "tau_graph", "alpha_link"]
@@ -365,7 +317,9 @@ class GRAFTTrainer:
             for i, item in enumerate(self.dev_data):
                 gold_set = set(item["gold_positions"])
                 retrieved_set = set(all_top_k_indices[i].tolist())
-                recall = len(gold_set & retrieved_set) / len(gold_set) if gold_set else 0.0
+                recall = (
+                    len(gold_set & retrieved_set) / len(gold_set) if gold_set else 0.0
+                )
                 recall_scores.append(recall)
 
         return sum(recall_scores) / len(recall_scores) if recall_scores else 0.0
@@ -377,15 +331,9 @@ class GRAFTTrainer:
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-            # Build filename with kNN info (same as wandb run name)
-            semantic_k = self.config["data"]["semantic_k"]
-            knn_only = self.config["data"]["knn_only"]
-
-            if semantic_k is not None:
-                suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
-                filename = f"encoder_{tag}{suffix}.pt"
-            else:
-                filename = f"encoder_{tag}.pt"
+            # Build filename with kNN suffix
+            suffix = get_knn_suffix(self.config)
+            filename = f"encoder_{tag}{suffix}.pt"
 
             checkpoint_path = output_dir / filename
             torch.save(unwrapped_encoder.state_dict(), checkpoint_path)
@@ -487,7 +435,16 @@ class GRAFTTrainer:
 
             pbar.close()
 
-        self._save_checkpoint("final")
+            # Save checkpoint after each epoch
+            if self.accelerator.is_main_process:
+                logger.info(
+                    f"Epoch {epoch + 1}/{self.config['train']['epochs']} complete"
+                )
+            self._save_checkpoint("final")
+
+        # Final save at end of all training
+        if self.accelerator.is_main_process:
+            logger.info("Training complete")
         if self.accelerator.is_main_process:
             wandb.finish()
 

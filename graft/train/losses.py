@@ -7,14 +7,15 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
-def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_negs=None):
-    """Soft-OR InfoNCE with in-batch negatives and optional hard negatives.
+def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None):
+    """Soft-OR InfoNCE with in-batch negatives.
 
     Standard in-batch negative sampling (Karpukhin et al., 2020):
     For each query i:
       - Numerator: logsumexp over query i's positives only
-      - Denominator: logsumexp over ALL subgraph nodes + hard negatives
-      - Other queries' positives are treated as negatives (realistic hard negatives)
+      - Denominator: logsumexp over ALL subgraph nodes
+      - Other queries' positives are treated as negatives
+      - Hard negatives come from neg_seed_ratio in sampler (already in subgraph)
 
     Args:
         query_embeds: (B, D)
@@ -22,7 +23,6 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_
         labels: (B, K) positive node indices into doc_embeds, per query
         tau: temperature
         labels_mask: (B, K) boolean mask for valid labels (handles variable positives)
-        hard_negs: (B, M) hard negative node indices into doc_embeds, per query
 
     Returns:
         Scalar loss (averaged across B queries)
@@ -31,11 +31,10 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_
     num_subgraph_nodes = doc_embeds.size(0)
 
     # Compute scores for all query-document pairs in subgraph: (B, N)
-    scores_subgraph = torch.matmul(query_embeds, doc_embeds.T) / tau
+    scores = torch.matmul(query_embeds, doc_embeds.T) / tau
 
     # Build positive mask: mark each query's own positives (B, N)
-    # Use advanced indexing to vectorize: scatter labels into (B, N) mask
-    pos_mask_subgraph = torch.zeros(
+    pos_mask = torch.zeros(
         (batch_size, num_subgraph_nodes), dtype=torch.bool, device=query_embeds.device
     )
 
@@ -46,37 +45,18 @@ def info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask=None, hard_
         # Only scatter valid labels
         valid_batch_idx = batch_indices[labels_mask]
         valid_labels = labels[labels_mask]
-        pos_mask_subgraph[valid_batch_idx, valid_labels] = True
+        pos_mask[valid_batch_idx, valid_labels] = True
     else:
         # Scatter all labels
-        pos_mask_subgraph[batch_indices.flatten(), labels.flatten()] = True
-
-    # Add hard negatives if provided
-    if hard_negs is not None:
-        hard_neg_embeds = doc_embeds[hard_negs]  # (B, M, D)
-        scores_hard = torch.matmul(
-            query_embeds.unsqueeze(1), hard_neg_embeds.transpose(1, 2)
-        ).squeeze(1) / tau  # (B, M)
-
-        # Concatenate subgraph and hard negative scores
-        all_scores = torch.cat([scores_subgraph, scores_hard], dim=1)  # (B, N+M)
-
-        # Extend positive mask (hard negs are never positives)
-        pos_mask_hard = torch.zeros(
-            (batch_size, hard_negs.size(1)), dtype=torch.bool, device=query_embeds.device
-        )
-        pos_mask = torch.cat([pos_mask_subgraph, pos_mask_hard], dim=1)  # (B, N+M)
-    else:
-        all_scores = scores_subgraph
-        pos_mask = pos_mask_subgraph
+        pos_mask[batch_indices.flatten(), labels.flatten()] = True
 
     # Compute per-query InfoNCE loss
     # Numerator: logsumexp over positives only
-    pos_scores = all_scores.masked_fill(~pos_mask, -1e10)
+    pos_scores = scores.masked_fill(~pos_mask, -1e10)
     log_numerator = torch.logsumexp(pos_scores, dim=1)  # (B,)
 
-    # Denominator: logsumexp over all candidates (in-batch negatives + hard negatives)
-    log_denominator = torch.logsumexp(all_scores, dim=1)  # (B,)
+    # Denominator: logsumexp over all subgraph nodes (in-batch negatives)
+    log_denominator = torch.logsumexp(scores, dim=1)  # (B,)
 
     # Average loss across batch
     loss = -(log_numerator - log_denominator).mean()
@@ -148,13 +128,12 @@ def compute_total_loss(
     tau_graph,
     alpha_link,
     labels_mask=None,
-    hard_negs=None,
 ):
     """Combine all losses: InfoNCE (q2d) + neighbor contrast + optional link prediction.
 
-    Supports hard negatives and variable-length positives via labels_mask.
+    Supports variable-length positives via labels_mask.
     """
-    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask, hard_negs)
+    loss_q2d = info_nce_loss(query_embeds, doc_embeds, labels, tau, labels_mask)
     loss_nbr = neighbor_contrast_loss(node_embeds, edge_index, tau_graph)
     loss = lambda_q2d * loss_q2d + (1 - lambda_q2d) * loss_nbr
 

@@ -5,9 +5,9 @@
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:l40s:4
+#SBATCH --gres=gpu:a100:4
 #SBATCH --mem=128GB
-#SBATCH -t 48:00:00
+#SBATCH -t 24:00:00
 
 module load miniforge/24.3.0-0
 conda activate graft
@@ -51,25 +51,6 @@ accelerate launch \
 
 echo "Training complete!"
 
-# Extract output directory and build encoder filename with kNN suffix
-ENCODER_PATH=$(python -c "
-import yaml
-config = yaml.safe_load(open('$CONFIG_PATH'))
-output_dir = config['experiment']['output_dir']
-semantic_k = config['data'].get('semantic_k')
-knn_only = config['data'].get('knn_only', False)
-
-if semantic_k is not None:
-    suffix = f'_knn_only{semantic_k}' if knn_only else f'_knn{semantic_k}'
-    filename = f'encoder_final{suffix}.pt'
-else:
-    filename = 'encoder_final.pt'
-
-print(f'{output_dir}/{filename}')
-")
-
-OUTPUT_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG_PATH'))['experiment']['output_dir'])")
-
 echo ""
-echo "=== Running evaluation ==="
-bash scripts/run_eval_graft.sh "$ENCODER_PATH" "$CONFIG_PATH" "$OUTPUT_DIR" validation
+echo "=== Running evaluation (uses config settings) ==="
+bash scripts/run_eval_graft.sh "$CONFIG_PATH"

@@ -11,6 +11,7 @@ from baselines.retrievers import GRAFTRetriever, ZeroShotRetriever, BM25Retrieve
 from graft.eval.utils import prepare_queries, evaluate_retrieval
 from graft.eval.embed_corpus import encode_texts
 from graft.models.encoder import load_trained_encoder
+from graft.utils import get_knn_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +30,13 @@ def main():
     parser.add_argument(
         "--method",
         type=str,
-        required=True,
+        default="graft",
         choices=["graft", "zero-shot", "bm25"],
-        help="Retrieval method to evaluate",
+        help="Retrieval method to evaluate (default: graft)",
     )
     parser.add_argument("--config", type=str, required=True, help="Path to config YAML")
     parser.add_argument(
-        "--output", type=str, required=True, help="Path to save results JSON"
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="test",
-        help="Dataset split (train/validation/test)",
-    )
-    parser.add_argument(
-        "--encoder-path", type=str, help="Path to encoder checkpoint (for GRAFT)"
+        "--encoder-path", type=str, help="Path to encoder checkpoint (overrides config)"
     )
     parser.add_argument(
         "--model-name", type=str, help="HuggingFace model name (for zero-shot)"
@@ -59,6 +51,21 @@ def main():
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
+
+    # Determine split and paths from config
+    split = config["eval"]["split"]
+    output_dir = Path(config["experiment"]["output_dir"])
+    suffix = get_knn_suffix(config)
+
+    # Get encoder path from config if not provided via CLI
+    if args.method == "graft" and not args.encoder_path:
+        checkpoint = config["eval"]["checkpoint"]
+        args.encoder_path = str(output_dir / f"encoder_{checkpoint}{suffix}.pt")
+        logger.info(f"Using encoder from config: {args.encoder_path}")
+
+    # Generate output path
+    output_path = output_dir / f"results_{split}{suffix}.json"
+    logger.info(f"Results will be saved to: {output_path}")
 
     logger.info(f"Loading graph...")
     graph_dir = Path(config["data"]["graph_dir"])
@@ -111,8 +118,8 @@ def main():
         sampled_node_texts = graph.node_text
         sampled_doc_id_to_node_ids = graph.doc_id_to_node_ids
 
-    logger.info(f"Preparing queries from {args.split} split...")
-    queries = prepare_queries(args.split, sampled_doc_id_to_node_ids)
+    logger.info(f"Preparing queries from {split} split...")
+    queries = prepare_queries(split, sampled_doc_id_to_node_ids)
     logger.info(f"Loaded {len(queries)} queries")
 
     topk = config["index"]["topk"]
@@ -165,7 +172,7 @@ def main():
         retriever.search,
         topk,
         method_name,
-        args.output,
+        str(output_path),
         config["eval"],
         batch_size=eval_batch_size,
     )

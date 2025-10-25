@@ -32,7 +32,7 @@ def _sample_confusers(
         return []
     count = min(max_count, len(candidates))
     perm = torch.randperm(len(candidates), generator=generator)[:count]
-    return [candidates[idx.item()] for idx in perm]
+    return [candidates[int(idx)] for idx in perm]
 
 
 def _sample_random_negatives(
@@ -100,7 +100,9 @@ def build_dev_set(
         )
         num_negatives = max_available
 
-    confuser_candidates = _gather_confuser_candidates(dev_pairs, num_dev_queries, positives)
+    confuser_candidates = _gather_confuser_candidates(
+        dev_pairs, num_dev_queries, positives
+    )
     confuser_goal = int(num_negatives * confuser_fraction)
     confuser_nodes = _sample_confusers(confuser_candidates, confuser_goal, generator)
 
@@ -123,7 +125,7 @@ def build_dev_set(
 
     corpus_indices = list(positives) + confuser_nodes + random_negatives
     perm = torch.randperm(len(corpus_indices), generator=generator)
-    corpus_indices = [corpus_indices[i.item()] for i in perm]
+    corpus_indices = [corpus_indices[i] for i in perm]
 
     dev_set = _build_dev_queries(dev_pairs[:num_dev_queries], corpus_indices)
 

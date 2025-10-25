@@ -28,13 +28,13 @@ def load_query_pairs(split, graph_path, config, log=True):
     queries_ds = load_dataset(dataset, "queries", split="queries")
     qrels_ds = load_dataset(dataset, "default", split=split)
 
-    qid_to_query = {item["_id"]: item["text"] for item in queries_ds}
+    qid_to_query = {item["_id"]: item["text"] for item in queries_ds}  # type: ignore
 
     qid_to_docs = {}
     for item in qrels_ds:
-        qid = item["query-id"]
-        doc_id = item["corpus-id"]
-        score = item["score"]
+        qid = item["query-id"]  # type: ignore
+        doc_id = item["corpus-id"]  # type: ignore
+        score = item["score"]  # type: ignore
 
         if score > 0 and doc_id in doc_id_to_node_ids:
             if qid not in qid_to_docs:

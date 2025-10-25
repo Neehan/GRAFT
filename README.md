@@ -41,14 +41,16 @@ bash scripts/run_train.sh configs/hotpot_e5_sage.yml
 
 ### 3. Evaluate GRAFT
 ```bash
-bash scripts/run_eval_graft.sh \
-  outputs/graft_hotpot_e5_sage/encoder_best.pt \
-  configs/hotpot_e5_sage.yml \
-  outputs/graft_hotpot_e5_sage \
-  dev
+bash scripts/run_eval_graft.sh configs/hotpot_e5_sage.yml
 ```
 
-Encodes corpus, builds FAISS, computes metrics. Set `eval.corpus_size: 500000` in config to sample instead of full 5.2M corpus (7min vs 1hr).
+Config controls:
+- `eval.checkpoint: best` - which checkpoint (best/final)
+- `eval.split: test` - dataset split (train/dev/test)
+- `eval.corpus_size: 500000` - sample size (null = full 5.2M)
+- Results: `results_test_knn_only15.json` (auto-suffixed)
+
+Training automatically runs evaluation after completion.
 
 ### 4. Run baselines
 ```bash

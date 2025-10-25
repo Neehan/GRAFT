@@ -8,6 +8,7 @@ from datasets import load_dataset
 
 from graft.data.build_graph import build_hotpot_graph
 from graft.data.augment_graph import augment_with_knn
+from graft.utils import get_knn_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ def prepare_hotpot_data(config, split="train"):
     semantic_k = config["data"].get("semantic_k")
     if semantic_k is not None:
         knn_only = config["data"].get("knn_only", False)
-        suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
+        suffix = get_knn_suffix(config)
         augmented_path = output_dir / f"{graph_name}{suffix}.pt"
 
         logger.info(

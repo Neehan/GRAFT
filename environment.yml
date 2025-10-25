@@ -15,6 +15,7 @@ dependencies:
   - pip
   - pip:
       - faiss-gpu # Using pip version for better portability
+      - bm25s
       - transformers>=4.30.0
       - accelerate>=0.20.0
       - datasets>=2.16.0,<4.0.0

@@ -22,7 +22,7 @@ def encode_texts(texts, encoder, config, device):
             batch = texts[i : i + batch_size]
             unwrapped = encoder.module if hasattr(encoder, "module") else encoder
             if use_amp:
-                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):  # type: ignore
                     batch_embeds = unwrapped.encode(batch, device)
             else:
                 batch_embeds = unwrapped.encode(batch, device)

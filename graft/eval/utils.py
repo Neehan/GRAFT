@@ -28,13 +28,13 @@ def prepare_queries(split, doc_id_to_node_ids):
     queries_ds = load_dataset("mteb/hotpotqa", "queries", split="queries")
     qrels_ds = load_dataset("mteb/hotpotqa", "default", split=split)
 
-    qid_to_query = {item["_id"]: item["text"] for item in queries_ds}
+    qid_to_query = {item["_id"]: item["text"] for item in queries_ds}  # type: ignore
 
     query_gold_docs = {}
     for item in qrels_ds:
-        qid = item["query-id"]
-        doc_id = item["corpus-id"]
-        score = item["score"]
+        qid = item["query-id"]  # type: ignore
+        doc_id = item["corpus-id"]  # type: ignore
+        score = item["score"]  # type: ignore
 
         if score > 0 and doc_id in doc_id_to_node_ids:
             if qid not in query_gold_docs:

@@ -29,40 +29,21 @@ fi
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 
-ENCODER_PATH=$1
-CONFIG_PATH=$2
-OUTPUT_DIR=$3
-SPLIT=${4:-validation}
+CONFIG_PATH=$1
 
-if [ -z "$ENCODER_PATH" ] || [ -z "$CONFIG_PATH" ] || [ -z "$OUTPUT_DIR" ]; then
-    echo "Usage: bash scripts/run_eval_graft.sh ENCODER_PATH CONFIG_PATH OUTPUT_DIR [SPLIT]"
-    echo "Example: bash scripts/run_eval_graft.sh outputs/graft_hotpot_e5_sage/encoder_best.pt configs/hotpot_e5_sage.yml outputs/eval_graft validation"
+if [ -z "$CONFIG_PATH" ]; then
+    echo "Usage: bash scripts/run_eval_graft.sh CONFIG_PATH"
+    echo "Example: bash scripts/run_eval_graft.sh configs/hotpot_e5_sage.yml"
+    echo ""
+    echo "Config controls: checkpoint (best/final), split (train/dev/test), output_dir, etc."
     exit 1
 fi
 
 echo "=== GRAFT Evaluation Pipeline ==="
-echo "Encoder: $ENCODER_PATH"
 echo "Config: $CONFIG_PATH"
-echo "Output: $OUTPUT_DIR"
-echo "Split: $SPLIT"
 echo "GPUs available: $(nvidia-smi --list-gpus | wc -l)"
 nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv
 echo ""
 
-mkdir -p "$OUTPUT_DIR"
-
-RESULTS_PATH="$OUTPUT_DIR/results.json"
-
-# Evaluate (encodes corpus on-the-fly, respects eval.corpus_size for sampling)
-echo "Evaluating GRAFT (encoding corpus on-the-fly)..."
-python -m graft.eval.evaluate \
-    --method graft \
-    --encoder-path "$ENCODER_PATH" \
-    --config "$CONFIG_PATH" \
-    --output "$RESULTS_PATH" \
-    --split "$SPLIT"
-echo ""
-
-echo "=== Evaluation complete! ==="
-echo "Results: $RESULTS_PATH"
-cat "$RESULTS_PATH"
+# Python script determines encoder path, output path, split from config
+python -m graft.eval.evaluate --config "$CONFIG_PATH"

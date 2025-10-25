@@ -23,10 +23,6 @@ encoder:
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
   neg_seed_ratio: 1.0 # Number of negative seeds = neg_seed_ratio * num_positive_seeds
-  hardneg_enabled: true # Hard negative mining from subgraph
-  hardneg_ratio: 0.3 # Mine top 30% of available negatives (per query) as hard negatives
-  hardneg_min: 32 # Minimum hard negatives per query (fallback for small subgraphs)
-  hardneg_max: 128 # Maximum hard negatives per query (cap for very large subgraphs)
 
 loss:
   tau: 0.1 # InfoNCE temperature
@@ -35,9 +31,9 @@ loss:
   alpha_link: 0.0
 
 train:
-  query_batch_size: 4
-  gradient_accumulation_steps: 16
-  epochs: 3
+  query_batch_size: 8
+  gradient_accumulation_steps: 8
+  epochs: 1
   lr_encoder: 1.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.05
@@ -55,6 +51,8 @@ dev:
   confuser_fraction: 0.1
 
 eval:
+  checkpoint: best # Which checkpoint to evaluate: 'best' or 'final'
+  split: test # Dataset split to evaluate: train/dev/test
   corpus_size: 500000 # null = full corpus, integer = sample for fast iteration (e.g., 500000)
   corpus_sample_seed: 42 # Fixed seed for reproducible sampling across methods
   recall_k: [5, 10]
