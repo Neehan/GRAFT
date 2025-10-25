@@ -161,7 +161,7 @@ class GRAFTTrainer:
             convert_to_numpy=False,
             normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
             device=self.device,
-            show_progress_bar=True,
+            show_progress_bar=False,
         )
 
     def _load_fixed_dev_set(self):
