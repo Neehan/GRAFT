@@ -20,7 +20,7 @@ from datasets import load_dataset
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-from graft.models.encoder import Encoder
+from sentence_transformers import SentenceTransformer
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.train.dev_utils import build_dev_set
@@ -98,14 +98,11 @@ class GRAFTTrainer:
         return str(graph_path)
 
     def _setup_models(self):
-        self.encoder = Encoder(
-            model_name=self.config["encoder"]["model_name"],
-            max_len=self.config["encoder"]["max_len"],
-            pool=self.config["encoder"]["pool"],
-            freeze_layers=self.config["encoder"]["freeze_layers"],
+        self.encoder = SentenceTransformer(
+            self.config["encoder"]["model_name"],
+            device=str(self.device)
         )
-
-        self.tokenizer = self.encoder.tokenizer
+        self.encoder.max_seq_length = self.config["encoder"]["max_len"]
 
     def _setup_data(self):
         if self.accelerator.is_main_process:
@@ -155,17 +152,17 @@ class GRAFTTrainer:
         )
 
     def _encode_texts(self, texts):
-        """Tokenize and encode texts in one forward pass."""
-        encoded = self.tokenizer(
+        """Encode texts using SentenceTransformer."""
+        unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
+        embeddings = unwrapped_encoder.encode(
             texts,
-            max_length=self.config["encoder"]["max_len"],
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
+            convert_to_tensor=True,
+            normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
+            batch_size=self.config["encoder"]["train_batch_size"],
+            show_progress_bar=False,
+            device=str(self.device)
         )
-        ids = encoded["input_ids"].to(self.device)
-        mask = encoded["attention_mask"].to(self.device)
-        return self.encoder(ids, mask)
+        return embeddings
 
     def _load_fixed_dev_set(self):
         """Build small dev corpus for fast realistic evaluation."""
@@ -264,53 +261,33 @@ class GRAFTTrainer:
             corpus_texts = [
                 self.graph.node_text[idx] for idx in self.dev_corpus_indices
             ]
-            corpus_embeds = []
-            pbar = tqdm(
-                total=len(corpus_texts),
-                desc="Encoding dev corpus",
-                disable=not self.accelerator.is_main_process,
+            corpus_embeds = unwrapped_encoder.encode(
+                corpus_texts,
+                convert_to_tensor=True,
+                normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
+                batch_size=encoder_batch_size,
+                show_progress_bar=self.accelerator.is_main_process,
+                device=str(self.device)
             )
-            # self._log_memory("Before corpus encoding")
-            for i in range(0, len(corpus_texts), encoder_batch_size):
-                batch = corpus_texts[i : i + encoder_batch_size]
-                embeds = unwrapped_encoder.encode(batch, self.device)
-                corpus_embeds.append(embeds.cpu())
-                pbar.update(len(batch))
-                # if i == 0:
-                # self._log_memory("After first corpus batch")
-            pbar.close()
-            corpus_embeds = torch.cat(corpus_embeds, dim=0).to(self.device)  # (100k, D)
             # self._log_memory("After corpus encoding")
 
-            # Encode queries in batches and compute top-k
+            # Encode queries and compute top-k
             queries = [item["query"] for item in self.dev_data]
-            all_top_k_indices = []
-
-            pbar = tqdm(
-                total=len(queries),
-                desc="Encoding queries & searching",
-                disable=not self.accelerator.is_main_process,
+            query_embeds = unwrapped_encoder.encode(
+                queries,
+                convert_to_tensor=True,
+                normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
+                batch_size=encoder_batch_size,
+                show_progress_bar=self.accelerator.is_main_process,
+                device=str(self.device)
             )
-            # self._log_memory("Before query encoding")
-            for q_start in range(0, len(queries), encoder_batch_size):
-                q_end = min(q_start + encoder_batch_size, len(queries))
-                query_batch = queries[q_start:q_end]
 
-                # Encode query batch
-                query_embeds = unwrapped_encoder.encode(query_batch, self.device)
+            # Compute scores: (num_queries, corpus_size)
+            scores = torch.matmul(query_embeds, corpus_embeds.T)
 
-                # Compute scores for this query batch: (batch_size, corpus_size)
-                scores = torch.matmul(query_embeds, corpus_embeds.T)
-
-                # Get top-k per query
-                _, top_k_indices = torch.topk(scores, k=recall_k, dim=1)
-                all_top_k_indices.append(top_k_indices.cpu())
-                pbar.update(len(query_batch))
-                # if q_start == 0:
-                # self._log_memory("After first query batch")
-            pbar.close()
-
-            all_top_k_indices = torch.cat(all_top_k_indices, dim=0)
+            # Get top-k per query
+            _, all_top_k_indices = torch.topk(scores, k=recall_k, dim=1)
+            all_top_k_indices = all_top_k_indices.cpu()
             # self._log_memory("After query encoding")
 
             # Compute recall@k (fraction of gold docs retrieved, not binary hit)
@@ -326,18 +303,18 @@ class GRAFTTrainer:
         return sum(recall_scores) / len(recall_scores) if recall_scores else 0.0
 
     def _save_checkpoint(self, tag):
-        """Save model checkpoints."""
+        """Save model checkpoints in SentenceTransformer format."""
         if self.accelerator.is_main_process:
             output_dir = Path(self.config["experiment"]["output_dir"])
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-            # Build filename with kNN suffix
+            # Build directory name with kNN suffix
             suffix = get_knn_suffix(self.config)
-            filename = f"encoder_{tag}{suffix}.pt"
+            checkpoint_name = f"encoder_{tag}{suffix}"
+            checkpoint_path = output_dir / checkpoint_name
 
-            checkpoint_path = output_dir / filename
-            torch.save(unwrapped_encoder.state_dict(), checkpoint_path)
+            unwrapped_encoder.save(str(checkpoint_path))
             logger.info(f"Saved checkpoint: {checkpoint_path}")
 
     def train(self):
@@ -407,8 +384,6 @@ class GRAFTTrainer:
                         pbar.set_postfix(
                             {"loss": f"{loss.item():.4f}", "step": self.global_step}
                         )
-
-                    del batch, step_output, loss, loss_q2d, loss_nbr
 
                     if (
                         self.accelerator.sync_gradients

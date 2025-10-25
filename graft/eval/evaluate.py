@@ -9,8 +9,6 @@ from pathlib import Path
 
 from baselines.retrievers import GRAFTRetriever, ZeroShotRetriever, BM25Retriever
 from graft.eval.utils import prepare_queries, evaluate_retrieval
-from graft.eval.embed_corpus import encode_texts
-from graft.models.encoder import load_trained_encoder
 from graft.utils import get_knn_suffix
 
 logger = logging.getLogger(__name__)
@@ -125,13 +123,11 @@ def main():
     topk = config["index"]["topk"]
 
     if args.method == "graft":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        encoder = load_trained_encoder(args.encoder_path, config, device)
-        if torch.cuda.device_count() > 1:
-            logger.info(f"Using {torch.cuda.device_count()} GPUs for encoding")
-            encoder = torch.nn.DataParallel(encoder)
-        logger.info(f"Encoding {len(sampled_node_texts)} corpus texts...")
-        embeddings = encode_texts(sampled_node_texts, encoder, config, device)
+        logger.info(f"Loading GRAFT model and encoding corpus...")
+        embeddings = load_embeddings(
+            str(output_dir / f"embeddings_{split}{suffix}.npy"),
+            sampled_indices
+        )
         retriever = GRAFTRetriever(args.encoder_path, embeddings, config)
         method_name = "GRAFT"
 

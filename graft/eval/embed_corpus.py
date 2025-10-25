@@ -4,38 +4,16 @@ import logging
 import torch
 import numpy as np
 from pathlib import Path
-from tqdm import tqdm
-
-from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
-
-
-def encode_texts(texts, encoder, config, device):
-    """Encode list of texts to embeddings."""
-    embeddings = []
-    batch_size = config["encoder"]["eval_batch_size"]
-    use_amp = config["train"]["bf16"]
-
-    with torch.no_grad():
-        for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
-            batch = texts[i : i + batch_size]
-            unwrapped = encoder.module if hasattr(encoder, "module") else encoder
-            if use_amp:
-                with torch.amp.autocast("cuda", dtype=torch.bfloat16):  # type: ignore
-                    batch_embeds = unwrapped.encode(batch, device)
-            else:
-                batch_embeds = unwrapped.encode(batch, device)
-            embeddings.append(batch_embeds.cpu())
-
-    return torch.cat(embeddings, dim=0).numpy()
 
 
 def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None):
     """Embed corpus with encoder.
 
     Args:
-        encoder_path: Path to trained checkpoint (.pt) OR HuggingFace model name
+        encoder_path: Path to trained checkpoint (directory) OR HuggingFace model name
         config: Config dict
         output_path: Path to save embeddings .npy file
         cached_embeddings_path: Path to cached embeddings to reuse (optional, for zero-shot)
@@ -53,27 +31,34 @@ def embed_corpus(encoder_path, config, output_path, cached_embeddings_path=None)
         suffix = f"_knn_only{semantic_k}" if knn_only else f"_knn{semantic_k}"
         graph_path = graph_dir / f"{graph_name}{suffix}.pt"
 
-    is_checkpoint = Path(encoder_path).exists()
-
     if cached_embeddings_path and Path(cached_embeddings_path).exists():
         logger.info(f"Loading cached embeddings from {cached_embeddings_path}")
         all_embeddings = np.load(cached_embeddings_path)
         logger.info(f"Loaded embeddings: {all_embeddings.shape}")
     else:
-        if is_checkpoint:
-            logger.info(f"Loading trained encoder from {encoder_path}")
-            encoder = load_trained_encoder(encoder_path, config, device)
-        else:
-            logger.info(f"Loading zero-shot model: {encoder_path}")
-            encoder = load_zero_shot_encoder(encoder_path, config, device)
+        logger.info(f"Loading encoder from {encoder_path}")
+        encoder = SentenceTransformer(encoder_path, device=str(device))
+        encoder.max_seq_length = config["encoder"]["max_len"]
+        encoder.eval()
 
-        if torch.cuda.device_count() > 1:
-            logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        num_gpus = torch.cuda.device_count()
+        if num_gpus > 1:
+            logger.info(f"Using {num_gpus} GPUs with DataParallel for encoder")
             encoder = torch.nn.DataParallel(encoder)
 
         logger.info(f"Loading graph from {graph_path}")
         graph = torch.load(str(graph_path), weights_only=False)
-        all_embeddings = encode_texts(graph.node_text, encoder, config, device)
+
+        logger.info(f"Encoding {len(graph.node_text)} texts...")
+        base_encoder = encoder.module if num_gpus > 1 else encoder
+        all_embeddings = base_encoder.encode(
+            graph.node_text,
+            convert_to_tensor=False,
+            normalize_embeddings=config["encoder"]["normalize_embeddings"],
+            batch_size=config["encoder"]["eval_batch_size"],
+            show_progress_bar=True,
+            device=str(device)
+        )
 
     all_embeddings = all_embeddings.astype(np.float16)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

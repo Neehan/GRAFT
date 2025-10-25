@@ -14,8 +14,7 @@ data:
 encoder:
   model_name: intfloat/e5-base-v2
   max_len: 256
-  pool: cls
-  freeze_layers: 0
+  normalize_embeddings: true # L2 normalize embeddings for cosine similarity (recommended for e5)
   train_batch_size: 256
   dev_batch_size: 1024
   eval_batch_size: 2048

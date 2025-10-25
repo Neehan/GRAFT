@@ -5,14 +5,12 @@ from pathlib import Path
 from typing import Literal, Union
 
 import faiss
-import os
 
 import numpy as np
 import torch
 import bm25s
 from tqdm import tqdm
-
-from graft.models.encoder import load_trained_encoder, load_zero_shot_encoder
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +53,17 @@ class ZeroShotRetriever(BaseRetriever):
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading zero-shot encoder: {model_name}")
-        encoder = load_zero_shot_encoder(model_name, self.config, self.device)
+        encoder = SentenceTransformer(model_name, device=str(self.device))
+        encoder.max_seq_length = self.config["encoder"]["max_len"]
+        encoder.eval()
 
         if self.num_gpus > 1:
             logger.info(f"Using {self.num_gpus} GPUs with DataParallel for encoder")
             self.encoder = torch.nn.DataParallel(encoder)
-            self._is_parallel = True
+            self._base_encoder = encoder
         else:
             self.encoder = encoder
-            self._is_parallel = False
+            self._base_encoder = encoder
 
     def _load_embeddings(self, source: Union[str, np.ndarray]) -> np.ndarray:
         if isinstance(source, np.ndarray):
@@ -142,18 +142,25 @@ class ZeroShotRetriever(BaseRetriever):
             queries = [queries]
 
         with torch.no_grad():
-            encoder = self.encoder.module if self._is_parallel else self.encoder
-            query_embeds = encoder.encode(queries, self.device).cpu().numpy()
-            query_embeds = query_embeds / np.linalg.norm(
-                query_embeds, axis=1, keepdims=True
+            query_embeds = self._base_encoder.encode(
+                queries,
+                convert_to_tensor=False,
+                normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
+                batch_size=self.config["encoder"]["eval_batch_size"],
+                show_progress_bar=False,
+                device=str(self.device),
             )
             query_embeds = np.ascontiguousarray(query_embeds, dtype=np.float32)
-            indices_batches = []
-            for start in range(0, query_embeds.shape[0], self.search_batch_size):
-                end = min(start + self.search_batch_size, query_embeds.shape[0])
-                _, idx = self.index.search(query_embeds[start:end], k)
-                indices_batches.append(idx)
-            indices = np.vstack(indices_batches)
+
+            if query_embeds.shape[0] <= self.search_batch_size:
+                _, indices = self.index.search(query_embeds, k)
+            else:
+                indices_batches = []
+                for start in range(0, query_embeds.shape[0], self.search_batch_size):
+                    end = min(start + self.search_batch_size, query_embeds.shape[0])
+                    _, idx = self.index.search(query_embeds[start:end], k)
+                    indices_batches.append(idx)
+                indices = np.vstack(indices_batches)
 
         results = [idx.tolist() for idx in indices]
         return results[0] if is_single else results
@@ -164,15 +171,17 @@ class GRAFTRetriever(ZeroShotRetriever):
 
     def _load_encoder(self, model_name):
         logger.info(f"Loading GRAFT encoder from {model_name}")
-        encoder = load_trained_encoder(model_name, self.config, self.device)
+        encoder = SentenceTransformer(model_name, device=str(self.device))
+        encoder.max_seq_length = self.config["encoder"]["max_len"]
+        encoder.eval()
 
         if self.num_gpus > 1:
             logger.info(f"Using {self.num_gpus} GPUs with DataParallel for encoder")
             self.encoder = torch.nn.DataParallel(encoder)
-            self._is_parallel = True
+            self._base_encoder = encoder
         else:
             self.encoder = encoder
-            self._is_parallel = False
+            self._base_encoder = encoder
 
 
 class BM25Retriever(BaseRetriever):
