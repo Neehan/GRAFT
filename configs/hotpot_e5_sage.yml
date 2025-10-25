@@ -26,24 +26,24 @@ graph:
 loss:
   tau: 0.1 # InfoNCE temperature
   tau_graph: 0.2 # Graph temperature
-  lambda_q2d: 0.9 # Primary retrieval objective (graph structure via neighbor loss)
+  lambda_q2d: 0.95 # Primary retrieval objective (graph structure via neighbor loss)
   alpha_link: 0.0
 
 train:
   query_batch_size: 8
   gradient_accumulation_steps: 16
   epochs: 3
-  lr_encoder: 2.0e-5
+  lr_encoder: 1.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.05
   grad_clip: 1.0
   bf16: true
   seed: 42
-  log_every: 20
+  log_every: 10
   dev_every_steps: 100
   # Hard negative mining (subgraph-level)
   hardneg_enabled: true
-  hardneg_per_query: 32
+  hardneg_per_query: 64
 
 dev:
   num_samples: 1000

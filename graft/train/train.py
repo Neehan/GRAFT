@@ -359,15 +359,15 @@ class GRAFTTrainer:
             all_top_k_indices = torch.cat(all_top_k_indices, dim=0)
             # self._log_memory("After query encoding")
 
-            # Compute recall@k
-            correct = 0
+            # Compute recall@k (fraction of gold docs retrieved, not binary hit)
+            recall_scores = []
             for i, item in enumerate(self.dev_data):
                 gold_set = set(item["gold_positions"])
                 retrieved_set = set(all_top_k_indices[i].tolist())
-                if gold_set & retrieved_set:
-                    correct += 1
+                recall = len(gold_set & retrieved_set) / len(gold_set) if gold_set else 0.0
+                recall_scores.append(recall)
 
-        return correct / len(self.dev_data)
+        return sum(recall_scores) / len(recall_scores) if recall_scores else 0.0
 
     def _save_checkpoint(self, tag):
         """Save model checkpoints."""
