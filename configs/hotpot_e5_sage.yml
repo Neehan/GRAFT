@@ -24,7 +24,9 @@ graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
   neg_seed_ratio: 1.0 # Number of negative seeds = neg_seed_ratio * num_positive_seeds
   hardneg_enabled: true # Hard negative mining from subgraph
-  hardneg_per_query: 48 # Number of hard negatives to mine per query
+  hardneg_ratio: 0.3 # Mine top 30% of available negatives (per query) as hard negatives
+  hardneg_min: 32 # Minimum hard negatives per query (fallback for small subgraphs)
+  hardneg_max: 128 # Maximum hard negatives per query (cap for very large subgraphs)
 
 loss:
   tau: 0.1 # InfoNCE temperature
