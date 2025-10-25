@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm import tqdm
-from sentence_transformers import SentenceTransformer
 
 from baselines.retrievers import ZeroShotRetriever
+from graft.models.encoder import Encoder
 
 logger = logging.getLogger(__name__)
 
@@ -29,28 +29,101 @@ def embed_graph_nodes(graph, config, device=None):
 
     model_name = config["encoder"]["model_name"]
     logger.info(f"Loading encoder: {model_name}")
-    encoder = SentenceTransformer(model_name, device=str(device))
-    encoder.max_seq_length = config["encoder"]["max_len"]
-    encoder.eval()
+    encoder = Encoder(
+        model_name=model_name,
+        max_len=config["encoder"]["max_len"],
+        pool=config["encoder"]["pool"],
+        freeze_layers=0,
+    )
 
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1:
-        logger.info(f"Using {num_gpus} GPUs with DataParallel for encoder")
+    # Multi-GPU support
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
         encoder = torch.nn.DataParallel(encoder)
 
-    node_texts = graph.node_text
-    batch_size = config["encoder"]["eval_batch_size"]
+    encoder.to(device)
+    encoder.eval()
 
-    logger.info(f"Embedding {len(node_texts)} nodes with batch_size={batch_size}...")
-    base_encoder = encoder.module if num_gpus > 1 else encoder
-    embeddings = base_encoder.encode(
-        node_texts,
-        convert_to_tensor=False,
-        normalize_embeddings=config["encoder"]["normalize_embeddings"],
-        batch_size=batch_size,
-        show_progress_bar=True,
-        device=str(device)
+    node_texts = graph.node_text
+    embeddings = []
+
+    # Batch size is total across all GPUs (DataParallel will split it automatically)
+    batch_size = config["encoder"]["eval_batch_size"]
+    num_gpus = torch.cuda.device_count()
+    if num_gpus > 1:
+        logger.info(
+            f"Batch size: {batch_size} total (split across {num_gpus} GPUs = ~{batch_size // num_gpus} per GPU)"
+        )
+    else:
+        logger.info(f"Batch size: {batch_size}")
+
+    # Enable mixed precision for faster inference
+    use_amp = config["train"]["bf16"]
+    if use_amp:
+        logger.info("Using mixed precision (bfloat16)")
+
+    logger.info(f"Embedding {len(node_texts)} nodes...")
+
+    num_nodes = len(node_texts)
+    with torch.no_grad():
+        for i in tqdm(range(0, num_nodes, batch_size), desc="Embedding"):
+            batch = node_texts[i : i + batch_size]
+
+            # Use autocast for mixed precision
+            if use_amp:
+                with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):  # type: ignore
+                    batch_embeds = _encode_batch(encoder, batch, config, device)
+            else:
+                batch_embeds = _encode_batch(encoder, batch, config, device)
+
+            # Move to CPU immediately to avoid GPU memory accumulation
+            embeddings.append(batch_embeds.cpu())
+
+    return torch.cat(embeddings, dim=0).numpy()
+
+
+def _encode_batch(encoder, texts, config, device):
+    """Helper to encode a batch of texts.
+
+    Handles both DataParallel and single-GPU cases.
+    """
+    # Access tokenizer from encoder or encoder.module
+    if hasattr(encoder, "module"):
+        tokenizer = encoder.module.tokenizer
+        max_len = encoder.module.max_len
+        pool = encoder.module.pool
+    else:
+        tokenizer = encoder.tokenizer
+        max_len = encoder.max_len
+        pool = encoder.pool
+
+    encoded = tokenizer(
+        texts,
+        max_length=max_len,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
     )
+    input_ids = encoded["input_ids"].to(device)
+    attention_mask = encoded["attention_mask"].to(device)
+
+    # Forward pass
+    if hasattr(encoder, "module"):
+        outputs = encoder.module.model(
+            input_ids=input_ids, attention_mask=attention_mask
+        )
+    else:
+        outputs = encoder.model(input_ids=input_ids, attention_mask=attention_mask)
+
+    # Pooling
+    if pool == "cls":
+        embeddings = outputs.last_hidden_state[:, 0]
+    elif pool == "mean":
+        embeddings = (outputs.last_hidden_state * attention_mask.unsqueeze(-1)).sum(
+            1
+        ) / attention_mask.sum(-1, keepdim=True)
+    else:
+        raise ValueError(f"Unknown pooling method: {pool}")
 
     return embeddings
 
@@ -93,14 +166,14 @@ def build_knn_edges(embeddings, k, config):
     indices = np.vstack(all_indices)
 
     logger.info("Building edge list from kNN results...")
-    src = np.repeat(np.arange(num_nodes), k)
-    dst = indices[:, 1:].flatten()
+    edges = []
+    for src_node in tqdm(range(num_nodes), desc="Building edges"):
+        neighbors = indices[src_node][1:]
+        for dst_node in neighbors:
+            edges.append((src_node, int(dst_node)))
+            edges.append((int(dst_node), src_node))
 
-    edges_fwd = np.stack([src, dst], axis=1)
-    edges_bwd = np.stack([dst, src], axis=1)
-    edges = np.unique(np.vstack([edges_fwd, edges_bwd]), axis=0)
-
-    return [(int(s), int(d)) for s, d in edges]
+    return list(set(edges))
 
 
 def augment_with_knn(
@@ -141,10 +214,10 @@ def augment_with_knn(
         np.save(embeddings_cache, embeddings)
 
     old_num_edges = graph.edge_index.size(1)
+    old_degrees = torch.zeros(len(graph.node_text), dtype=torch.long)
     if old_num_edges > 0:
-        old_degrees = torch.bincount(graph.edge_index[0], minlength=len(graph.node_text))
-    else:
-        old_degrees = torch.zeros(len(graph.node_text), dtype=torch.long)
+        for node_id in graph.edge_index[0]:
+            old_degrees[node_id] += 1
     old_mean_degree = old_degrees.float().mean().item()
 
     knn_edges = build_knn_edges(embeddings, k, config)
@@ -163,10 +236,10 @@ def augment_with_knn(
     graph.edge_index = new_edge_index
 
     new_num_edges = new_edge_index.size(1)
+    new_degrees = torch.zeros(len(graph.node_text), dtype=torch.long)
     if new_num_edges > 0:
-        new_degrees = torch.bincount(new_edge_index[0], minlength=len(graph.node_text))
-    else:
-        new_degrees = torch.zeros(len(graph.node_text), dtype=torch.long)
+        for node_id in new_edge_index[0]:
+            new_degrees[node_id] += 1
     new_mean_degree = new_degrees.float().mean().item()
 
     logger.info(f"Graph augmentation complete:")
