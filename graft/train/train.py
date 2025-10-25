@@ -26,6 +26,7 @@ from graft.train.sampler import GraphBatchSampler
 from graft.train.dev_utils import build_dev_set
 from graft.data.pair_maker import load_query_pairs
 from graft.utils import get_knn_suffix
+from graft.models.training_wrapper import EncoderTrainingWrapper
 
 logger = logging.getLogger("graft.train")
 
@@ -98,10 +99,12 @@ class GRAFTTrainer:
         return str(graph_path)
 
     def _setup_models(self):
-        self.encoder = SentenceTransformer(
-            self.config["encoder"]["model_name"], device=str(self.device)
+        self.encoder = EncoderTrainingWrapper(
+            model_name=self.config["encoder"]["model_name"],
+            max_length=self.config["encoder"]["max_len"],
+            normalize=self.config["encoder"]["normalize_embeddings"]
         )
-        self.encoder.max_seq_length = self.config["encoder"]["max_len"]
+        self.encoder.to(self.device)
 
     def _setup_data(self):
         if self.accelerator.is_main_process:
@@ -151,22 +154,11 @@ class GRAFTTrainer:
         )
 
     def _encode_texts(self, texts):
-        """Encode texts using SentenceTransformer with gradient tracking."""
-        # Tokenize using the underlying tokenizer
+        """Encode texts with gradient tracking (matches E5 mean pooling)."""
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-        encoded = unwrapped_encoder.tokenize(texts)
-
-        # Move to device
-        encoded = {k: v.to(self.device) for k, v in encoded.items()}
-
-        # Forward pass through DDP-wrapped model
-        output = self.encoder(encoded)
-        embeddings = output["sentence_embedding"]
-
-        # Normalize if configured
-        if self.config["encoder"]["normalize_embeddings"]:
-            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-
+        batch_dict = unwrapped_encoder.tokenize(texts)
+        batch_dict = {k: v.to(self.device) for k, v in batch_dict.items()}
+        embeddings = self.encoder(batch_dict)
         return embeddings
 
     def _load_fixed_dev_set(self):
@@ -254,19 +246,19 @@ class GRAFTTrainer:
 
     def _evaluate(self):
         """Fast realistic dev eval: retrieve from 100k corpus."""
-        # self._log_memory("Start dev eval")
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
+        st_encoder = unwrapped_encoder.get_sentence_transformer()
+        st_encoder.to(self.device)
 
         recall_k = self.config["dev"]["recall_k"]
         encoder_batch_size = self.config["encoder"]["dev_batch_size"]
 
         with torch.no_grad():
-            # Encode dev corpus
             corpus_texts = [
                 self.graph.node_text[idx] for idx in self.dev_corpus_indices
             ]
-            corpus_embeds = unwrapped_encoder.encode(
+            corpus_embeds = st_encoder.encode(
                 corpus_texts,
                 convert_to_tensor=True,
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
@@ -274,11 +266,9 @@ class GRAFTTrainer:
                 show_progress_bar=self.accelerator.is_main_process,
                 device=str(self.device),
             )
-            # self._log_memory("After corpus encoding")
 
-            # Encode queries and compute top-k
             queries = [item["query"] for item in self.dev_data]
-            query_embeds = unwrapped_encoder.encode(
+            query_embeds = st_encoder.encode(
                 queries,
                 convert_to_tensor=True,
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
@@ -314,12 +304,12 @@ class GRAFTTrainer:
             output_dir.mkdir(parents=True, exist_ok=True)
             unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
-            # Build directory name with kNN suffix
             suffix = get_knn_suffix(self.config)
             checkpoint_name = f"encoder_{tag}{suffix}"
             checkpoint_path = output_dir / checkpoint_name
 
-            unwrapped_encoder.save(str(checkpoint_path))
+            st_model = unwrapped_encoder.get_sentence_transformer()
+            st_model.save(str(checkpoint_path))
             logger.info(f"Saved checkpoint: {checkpoint_path}")
 
     def train(self):
