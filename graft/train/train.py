@@ -99,8 +99,7 @@ class GRAFTTrainer:
 
     def _setup_models(self):
         self.encoder = SentenceTransformer(
-            self.config["encoder"]["model_name"],
-            device=str(self.device)
+            self.config["encoder"]["model_name"], device=str(self.device)
         )
         self.encoder.max_seq_length = self.config["encoder"]["max_len"]
 
@@ -152,16 +151,22 @@ class GRAFTTrainer:
         )
 
     def _encode_texts(self, texts):
-        """Encode texts using SentenceTransformer."""
+        """Encode texts using SentenceTransformer with gradient tracking."""
+        # Tokenize using the underlying tokenizer
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-        embeddings = unwrapped_encoder.encode(
-            texts,
-            convert_to_tensor=True,
-            normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
-            batch_size=self.config["encoder"]["train_batch_size"],
-            show_progress_bar=False,
-            device=str(self.device)
-        )
+        encoded = unwrapped_encoder.tokenize(texts)
+
+        # Move to device
+        encoded = {k: v.to(self.device) for k, v in encoded.items()}
+
+        # Forward pass through DDP-wrapped model
+        output = self.encoder(encoded)
+        embeddings = output["sentence_embedding"]
+
+        # Normalize if configured
+        if self.config["encoder"]["normalize_embeddings"]:
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
         return embeddings
 
     def _load_fixed_dev_set(self):
@@ -267,7 +272,7 @@ class GRAFTTrainer:
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
                 batch_size=encoder_batch_size,
                 show_progress_bar=self.accelerator.is_main_process,
-                device=str(self.device)
+                device=str(self.device),
             )
             # self._log_memory("After corpus encoding")
 
@@ -279,7 +284,7 @@ class GRAFTTrainer:
                 normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
                 batch_size=encoder_batch_size,
                 show_progress_bar=self.accelerator.is_main_process,
-                device=str(self.device)
+                device=str(self.device),
             )
 
             # Compute scores: (num_queries, corpus_size)
