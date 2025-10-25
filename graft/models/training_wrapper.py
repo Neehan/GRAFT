@@ -1,76 +1,78 @@
-"""Training wrapper for encoder that preserves gradients during forward pass."""
+"""Training wrapper that exposes gradient-preserving encode."""
 
+from __future__ import annotations
+
+import inspect
+from typing import Any, Sequence
+
+import numpy as np
 import torch
-import torch.nn as nn
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 
 
-def average_pool(last_hidden_states, attention_mask):
-    """Mean pooling with attention mask (E5 standard)."""
-    last_hidden = last_hidden_states.masked_fill(~attention_mask[..., None].bool(), 0.0)
-    return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
+# Underlying encode implementation without @torch.inference_mode()
+if hasattr(SentenceTransformer.encode, "__wrapped__"):
+    _ENCODE_WITH_GRAD = SentenceTransformer.encode.__wrapped__
+else:  # pragma: no cover - fallback for unexpected decorator behavior
+    _ENCODE_WITH_GRAD = inspect.unwrap(SentenceTransformer.encode)
 
 
-class EncoderTrainingWrapper(nn.Module):
-    """Wrapper around HF transformer for training with gradients.
+class EncoderTrainingWrapper(SentenceTransformer):
+    """SentenceTransformer subclass with gradient-friendly encode."""
 
-    Matches SentenceTransformer.encode() behavior but preserves gradients.
-    For evaluation, use the SentenceTransformer directly with .encode().
-    """
+    def __init__(self, model_name: str, max_length: int, normalize: bool):
+        super().__init__(model_name)
+        self.max_seq_length = max_length
+        self._train_normalize_default = normalize
 
-    def __init__(self, model_name, max_length, normalize):
-        super().__init__()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name)
-        self.max_length = max_length
-        self.normalize = normalize
+    def encode_with_grad(
+        self,
+        sentences: str | Sequence[str] | np.ndarray,
+        *,
+        prompt_name: str | None = None,
+        prompt: str | None = None,
+        batch_size: int = 32,
+        show_progress_bar: bool | None = None,
+        output_value: str | None = "sentence_embedding",
+        precision: str = "float32",
+        convert_to_numpy: bool = False,
+        convert_to_tensor: bool = True,
+        device: str | torch.device | Sequence[str | torch.device] | None = None,
+        normalize_embeddings: bool | None = None,
+        truncate_dim: int | None = None,
+        pool: dict[str, Any] | None = None,
+        chunk_size: int | None = None,
+        **kwargs: Any,
+    ) -> (
+        list[torch.Tensor]
+        | np.ndarray
+        | torch.Tensor
+        | dict[str, torch.Tensor]
+        | list[dict[str, torch.Tensor]]
+    ):
+        """Call SentenceTransformer.encode without inference_mode to keep gradients."""
+        if normalize_embeddings is None:
+            normalize_embeddings = self._train_normalize_default
 
-    def tokenize(self, texts):
-        """Tokenize texts (no gradients needed)."""
-        return self.tokenizer(
-            texts,
-            max_length=self.max_length,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
+        return _ENCODE_WITH_GRAD(
+            self,
+            sentences,
+            prompt_name=prompt_name,
+            prompt=prompt,
+            batch_size=batch_size,
+            show_progress_bar=show_progress_bar,
+            output_value=output_value,
+            precision=precision,
+            convert_to_numpy=convert_to_numpy,
+            convert_to_tensor=convert_to_tensor,
+            device=device,
+            normalize_embeddings=normalize_embeddings,
+            truncate_dim=truncate_dim,
+            pool=pool,
+            chunk_size=chunk_size,
+            **kwargs,
         )
 
-    def forward(self, batch_dict):
-        """Forward pass with gradient tracking.
-
-        Args:
-            batch_dict: Dict with input_ids, attention_mask, etc. from tokenizer
-
-        Returns:
-            Embeddings tensor (batch_size, hidden_dim)
-        """
-        outputs = self.model(**batch_dict)
-        embeddings = average_pool(
-            outputs.last_hidden_state, batch_dict["attention_mask"]
-        )
-
-        if self.normalize:
-            embeddings = nn.functional.normalize(embeddings)
-
-        return embeddings
-
-    def get_sentence_transformer(self):
-        """Convert to SentenceTransformer for evaluation/saving.
-
-        Returns:
-            SentenceTransformer with the trained weights
-        """
-        from sentence_transformers import SentenceTransformer
-
-        # Save HF model temporarily
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self.model.save_pretrained(tmp_dir)
-            self.tokenizer.save_pretrained(tmp_dir)
-
-            # Load as SentenceTransformer (will auto-detect pooling from config)
-            st_model = SentenceTransformer(tmp_dir)
-            st_model.max_seq_length = self.max_length
-
-        return st_model
+    def get_sentence_transformer(self) -> SentenceTransformer:
+        """Return self for evaluation (encode remains inference-mode)."""
+        return self

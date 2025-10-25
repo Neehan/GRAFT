@@ -19,8 +19,6 @@ from datasets import load_dataset
 
 warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-
-from sentence_transformers import SentenceTransformer
 from graft.train.losses import compute_total_loss
 from graft.train.sampler import GraphBatchSampler
 from graft.train.dev_utils import build_dev_set
@@ -102,7 +100,7 @@ class GRAFTTrainer:
         self.encoder = EncoderTrainingWrapper(
             model_name=self.config["encoder"]["model_name"],
             max_length=self.config["encoder"]["max_len"],
-            normalize=self.config["encoder"]["normalize_embeddings"]
+            normalize=self.config["encoder"]["normalize_embeddings"],
         )
         self.encoder.to(self.device)
 
@@ -154,12 +152,16 @@ class GRAFTTrainer:
         )
 
     def _encode_texts(self, texts):
-        """Encode texts with gradient tracking (matches E5 mean pooling)."""
-        unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
-        batch_dict = unwrapped_encoder.tokenize(texts)
-        batch_dict = {k: v.to(self.device) for k, v in batch_dict.items()}
-        embeddings = self.encoder(batch_dict)
-        return embeddings
+        """Encode texts with gradient tracking (matches SentenceTransformer.encode)."""
+        return self.encoder.encode_with_grad(
+            texts,
+            batch_size=self.config["encoder"]["train_batch_size"],
+            convert_to_tensor=True,
+            convert_to_numpy=False,
+            normalize_embeddings=self.config["encoder"]["normalize_embeddings"],
+            device=self.device,
+            show_progress_bar=False,
+        )
 
     def _load_fixed_dev_set(self):
         """Build small dev corpus for fast realistic evaluation."""
