@@ -72,7 +72,7 @@ class GraphBatchSampler:
         )
         result = self.sampler.sample_from_nodes(sampler_input)
 
-        edge_index = torch.stack([result.row, result.col], dim=0)
+        edge_index = torch.stack([result.row, result.col], dim=0)  # type: ignore
 
         return result.node, edge_index
 
@@ -112,7 +112,9 @@ class GraphBatchSampler:
             all_pos_nodes = list(dict.fromkeys(all_pos_nodes))
 
             extra_seed = self._sample_negative_seed(all_pos_nodes)
-            seed_nodes = all_pos_nodes + ([extra_seed] if extra_seed is not None else [])
+            seed_nodes = all_pos_nodes + (
+                [extra_seed] if extra_seed is not None else []
+            )
 
             # Use proper neighbor sampling with fanouts
             subset, edge_index = self._sample_neighbors(seed_nodes)
@@ -121,7 +123,9 @@ class GraphBatchSampler:
             num_pos_edges = edge_index.size(1)
 
             pos_edges = edge_index
-            neg_edges = self._sample_negative_edges(edge_index, num_nodes, num_pos_edges)
+            neg_edges = self._sample_negative_edges(
+                edge_index, num_nodes, num_pos_edges
+            )
 
             subgraph = type(
                 "Subgraph",
@@ -129,7 +133,7 @@ class GraphBatchSampler:
                 {
                     "edge_index": edge_index,
                     "n_id": subset,
-                    "n_id_cpu": subset.cpu(),
+                    "n_id_cpu": subset.cpu(),  # type: ignore
                 },
             )()
 

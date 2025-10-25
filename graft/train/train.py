@@ -36,7 +36,10 @@ class GRAFTTrainer:
         if torch.cuda.is_available() and self.accelerator.is_main_process:
             allocated = torch.cuda.memory_allocated() / 1024**3
             reserved = torch.cuda.memory_reserved() / 1024**3
-            logger.info(f"[{tag}] GPU memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+            logger.info(
+                f"[{tag}] GPU memory: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
+            )
+
     def __init__(self, config_path):
         self.config_path = config_path
         with open(config_path) as f:
@@ -76,15 +79,15 @@ class GRAFTTrainer:
             wandb.define_metric("global_step")
             wandb.define_metric("*", step_metric="global_step")
 
-        self._log_memory("After accelerator init")
+        # self._log_memory("After accelerator init")
         self._setup_models()
-        self._log_memory("After setup_models")
+        # self._log_memory("After setup_models")
         self._setup_data()
-        self._log_memory("After setup_data")
+        # self._log_memory("After setup_data")
         self._setup_training()
-        self._log_memory("After setup_training")
+        # self._log_memory("After setup_training")
         self._setup_hard_neg_miner()
-        self._log_memory("After setup_hard_neg_miner")
+        # self._log_memory("After setup_hard_neg_miner")
 
         self.global_step: int = 0
         self.best_recall: float = 0.0
@@ -151,7 +154,7 @@ class GRAFTTrainer:
         self.dev_data = self._load_fixed_dev_set()
 
     def _setup_training(self):
-        optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(  # type: ignore
             self.encoder.parameters(),
             lr=self.config["train"]["lr_encoder"],
             weight_decay=self.config["train"]["weight_decay"],
@@ -295,7 +298,7 @@ class GRAFTTrainer:
 
     def _evaluate(self):
         """Fast realistic dev eval: retrieve from 100k corpus."""
-        self._log_memory("Start dev eval")
+        # self._log_memory("Start dev eval")
         self.encoder.eval()
         unwrapped_encoder = self.accelerator.unwrap_model(self.encoder)
 
@@ -313,17 +316,17 @@ class GRAFTTrainer:
                 desc="Encoding dev corpus",
                 disable=not self.accelerator.is_main_process,
             )
-            self._log_memory("Before corpus encoding")
+            # self._log_memory("Before corpus encoding")
             for i in range(0, len(corpus_texts), encoder_batch_size):
                 batch = corpus_texts[i : i + encoder_batch_size]
                 embeds = unwrapped_encoder.encode(batch, self.device)
-                corpus_embeds.append(embeds)
+                corpus_embeds.append(embeds.cpu())
                 pbar.update(len(batch))
-                if i == 0:
-                    self._log_memory("After first corpus batch")
+                # if i == 0:
+                # self._log_memory("After first corpus batch")
             pbar.close()
-            corpus_embeds = torch.cat(corpus_embeds, dim=0)  # (100k, D)
-            self._log_memory("After corpus encoding")
+            corpus_embeds = torch.cat(corpus_embeds, dim=0).to(self.device)  # (100k, D)
+            # self._log_memory("After corpus encoding")
 
             # Encode queries in batches and compute top-k
             queries = [item["query"] for item in self.dev_data]
@@ -334,7 +337,7 @@ class GRAFTTrainer:
                 desc="Encoding queries & searching",
                 disable=not self.accelerator.is_main_process,
             )
-            self._log_memory("Before query encoding")
+            # self._log_memory("Before query encoding")
             for q_start in range(0, len(queries), encoder_batch_size):
                 q_end = min(q_start + encoder_batch_size, len(queries))
                 query_batch = queries[q_start:q_end]
@@ -349,12 +352,12 @@ class GRAFTTrainer:
                 _, top_k_indices = torch.topk(scores, k=recall_k, dim=1)
                 all_top_k_indices.append(top_k_indices.cpu())
                 pbar.update(len(query_batch))
-                if q_start == 0:
-                    self._log_memory("After first query batch")
+                # if q_start == 0:
+                # self._log_memory("After first query batch")
             pbar.close()
 
             all_top_k_indices = torch.cat(all_top_k_indices, dim=0)
-            self._log_memory("After query encoding")
+            # self._log_memory("After query encoding")
 
             # Compute recall@k
             correct = 0
