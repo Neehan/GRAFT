@@ -22,7 +22,7 @@ encoder:
 
 graph:
   fanouts: [5, 2] # 2-hop neighbor sampling: sample up to 5 neighbors at hop-1, 2 at hop-2
-  neg_seed_ratio: 0.25 # Number of negative seeds = neg_seed_ratio * num_positive_seeds
+  neg_seed_ratio: 1.0 # Number of negative seeds = neg_seed_ratio * num_positive_seeds
   hardneg_enabled: true # Hard negative mining from subgraph
   hardneg_per_query: 32 # Number of hard negatives to mine per query
 
