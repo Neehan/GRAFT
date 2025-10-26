@@ -30,18 +30,12 @@ export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=16
 
 CONFIG_PATH=${1:-configs/hotpot_e5_sage.yml}
-OUTPUT_DIR=${2:-outputs/baselines_test}
-SPLIT=${3:-test}
 
 echo "=== Running Baselines ==="
 echo "Config: $CONFIG_PATH"
-echo "Output dir: $OUTPUT_DIR"
-echo "Split: $SPLIT"
 echo "GPUs available: $(nvidia-smi --list-gpus | wc -l)"
 nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv
 echo ""
-
-mkdir -p "$OUTPUT_DIR"
 
 # 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
 # 1. Zero-shot E5 (main baseline: same encoder as GRAFT, but untrained)
@@ -92,11 +86,14 @@ echo ""
 #     --split "$SPLIT"
 
 echo "=== Baselines complete! ==="
-echo "Results saved to: $OUTPUT_DIR"
+BASELINE_DIR=$(python -c "import yaml; from pathlib import Path; config = yaml.safe_load(open('$CONFIG_PATH')); print(Path(config['experiment']['output_dir']) / 'baselines')")
+echo "Results saved to: $BASELINE_DIR"
 echo ""
 echo "Summary:"
-for file in "$OUTPUT_DIR"/*_results.json; do
-    echo ""
-    echo "$(basename "$file"):"
-    cat "$file"
+for file in "$BASELINE_DIR"/*_results_*.json; do
+    if [ -f "$file" ]; then
+        echo ""
+        echo "$(basename "$file"):"
+        cat "$file"
+    fi
 done
