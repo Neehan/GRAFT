@@ -63,8 +63,14 @@ def main():
         args.encoder_path = str(output_dir / f"encoder_{checkpoint}{suffix}.pt")
         logger.info(f"Using encoder from config: {args.encoder_path}")
 
-    # Generate output path
-    output_path = output_dir / f"results_{split}{suffix}.json"
+    # Generate output path (baselines go in baselines/ subdirectory)
+    if args.method in ["zero-shot", "bm25"]:
+        baseline_dir = output_dir / "baselines"
+        baseline_dir.mkdir(parents=True, exist_ok=True)
+        method_suffix = f"_{args.model_name.split('/')[-1]}" if args.method == "zero-shot" else ""
+        output_path = baseline_dir / f"{args.method}{method_suffix}_results_{split}{suffix}.json"
+    else:
+        output_path = output_dir / f"results_{split}{suffix}.json"
     logger.info(f"Results will be saved to: {output_path}")
 
     logger.info(f"Loading graph...")
