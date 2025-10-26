@@ -68,18 +68,14 @@ python -m graft.eval.evaluate \
     --method zero-shot \
     --model-name intfloat/e5-base-v2 \
     --embeddings "$CACHED_EMBEDDINGS" \
-    --config "$CONFIG_PATH" \
-    --output "$OUTPUT_DIR/zero_shot_e5_results.json" \
-    --split "$SPLIT"
+    --config "$CONFIG_PATH"
 echo ""
 
 # 2. BM25 baseline (sparse retrieval, no FAISS needed)
 echo "=== 2/2: Running BM25 ==="
 python -m graft.eval.evaluate \
     --method bm25 \
-    --config "$CONFIG_PATH" \
-    --output "$OUTPUT_DIR/bm25_results.json" \
-    --split "$SPLIT"
+    --config "$CONFIG_PATH"
 echo ""
 
 # Optional: Add other dense baselines (uncomment to run)
