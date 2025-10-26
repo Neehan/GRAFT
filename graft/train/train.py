@@ -167,7 +167,7 @@ class GRAFTTrainer:
         )
         ids = encoded["input_ids"].to(self.device)
         mask = encoded["attention_mask"].to(self.device)
-        return self.encoder(ids, mask)
+        return self.encoder(ids, mask, normalize=False)  # don't normalize for training
 
     def _load_fixed_dev_set(self):
         """Build small dev corpus for fast realistic evaluation."""

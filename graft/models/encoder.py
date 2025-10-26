@@ -28,7 +28,11 @@ class Encoder(nn.Module):
             for param in list(self.model.parameters())[:freeze_layers]:
                 param.requires_grad = False
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, normalize=None):
+        """
+        allow normalization to be overridden by the caller
+        """
+
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
 
         if self.pool == "cls":
@@ -40,7 +44,9 @@ class Encoder(nn.Module):
         else:
             raise ValueError(f"Unknown pooling method: {self.pool}")
 
-        if self.normalize:
+        if normalize is None:
+            normalize = self.normalize
+        if normalize:
             embeddings = F.normalize(embeddings, p=2, dim=-1)
 
         return embeddings
